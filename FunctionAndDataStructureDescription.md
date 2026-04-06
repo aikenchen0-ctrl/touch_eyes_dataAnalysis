@@ -46,6 +46,11 @@
 - `zhifaIOS.xcodeproj`：补充 `NSMotionUsageDescription`，允许真机上请求系统运动与健身权限，采集 walking/static 的系统侧证据。
 - 采集数据目录：默认写入 App 沙盒 `Documents/AispectImpactDataset`，每条样本单独保存为 JSON，便于后续批量导出到训练脚本。
 
+## Impact Dashboard GitHub Pages 部署补充
+- `docs/impact_dashboard/index.html`：作为 GitHub Pages 发布副本，复用本地 `tools/impact_dashboard/dashboard.html` 的静态内容，并将下载链接改为相对路径，确保项目站点子路径下可正常访问 `latest_samples.csv`。
+- `docs/impact_dashboard/data`：保存发布用 `latest_samples.json` 与 `latest_samples.csv` 静态数据副本，避免 GitHub Pages 直接暴露工具目录，便于后续独立替换数据文件。
+- `docs/index.html`：仓库 Pages 根入口，自动跳转到 `impact_dashboard` 子目录，降低访问路径记忆成本。
+
 ## 后续扩展建议
 - Aispect 事件路由与模块绑定建议单独抽出 `InteractionRouter`，避免与 UI 组件耦合。
 - 消息列表与侧栏建议加入虚拟化计算与滚动监听，满足大规模会话与消息量的性能目标。
@@ -145,3 +150,4 @@
 - 2026-04-05：将背景层统一改为纯黑底，关闭彩色 MeshGradient 底色，确保全屏背景视觉一致。
 - 2026-04-05：将根控制器与 SwiftUI 入口宿主层同步改为黑底，修复安全区仍然暴露白色背景的问题。
 - 2026-04-05：训练数据采集的运动标签扩展为“手持静止 / 放置静止 / 走路”，并兼容历史 `static` 标签映射到手持静止。
+- 2026-04-07：新增 `docs/impact_dashboard` GitHub Pages 发布目录与根入口跳转页，并修正发布副本里的数据下载相对路径。
