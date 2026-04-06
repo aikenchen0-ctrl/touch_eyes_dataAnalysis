@@ -1,9 +1,4 @@
-//
-//  zhifaIOSApp.swift
-//  zhifaIOS
-//
-//  Created by 刘羽晏 on 2026/1/22.
-//
+//  中文注释：应用入口与场景配置。
 
 import SwiftUI
 
@@ -11,7 +6,10 @@ import SwiftUI
 struct zhifaIOSApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ZStack {
+                Color.black.ignoresSafeArea()
+                ContentView()
+            }
         }
     }
 }
