@@ -1,0 +1,6 @@
+models/**/*.json filter=lfs diff=lfs merge=lfs -text
+android/aispect-core/src/main/assets/aispect_impact_models/AispectImpactCNNWeights*.json filter=lfs diff=lfs merge=lfs -text
+android/aispect-core/src/main/assets/aispect_impact_models/AispectImpactCNNScaler*.json filter=lfs diff=lfs merge=lfs -text
+data/**/*.tar.gz filter=lfs diff=lfs merge=lfs -text
+data/**/*.csv filter=lfs diff=lfs merge=lfs -text
+android/analysis/datasets/**/*.csv filter=lfs diff=lfs merge=lfs -text

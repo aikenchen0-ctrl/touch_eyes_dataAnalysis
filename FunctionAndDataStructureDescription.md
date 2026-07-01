@@ -1,10 +1,33 @@
 # 技术说明渐进式生效披露关闭手电筒轻量虚拟列表，仅监听滚动并按需复用可视项，用于侧栏大规模头像/流程列表。
 
 ## 闭眼检测补充
-- `AispectBlinkDetector`：基于 ARKit 人脸跟踪获取闭眼状态，满足 200ms 阈值后触发回调，并输出首帧延迟用于评估启动耗时。
-- `AispectBlinkDetector.Config`：修正闭眼持续时长参数命名为 `blinkHoldDuration`，与检测逻辑字段保持一致，恢复构建可用性。
+- `AispectBlinkDetector`：闭眼检测改为 `Vision + AVCaptureSession` 主链，优先使用前置 RGB 相机在 `640x480` 低分辨率下做实时人脸 landmarks 与眼睑开合比计算，仅在 Vision 会话不可用时退回 `ARKit`，显著降低启动负担与持续功耗。
+- `AispectBlinkDetector`：Vision 分支使用前置串行视频输出、丢弃积压帧、ROI 扩张后的人脸 landmarks 检测与轻量目标跟踪，首帧仍输出延迟指标，便于继续对比启动耗时。
+- `AispectBlinkDetector`：眨眼判定改为“眼睑开合比基线 + 平滑 + 持续时长阈值”的有限状态机，不再依赖 TrueDepth 才能得到的 `eyeBlinkLeft/right`，同时保留 ARKit `blendShapes` 作为兜底路径。
+- `AispectBlinkDetector.Config`：新增 Vision 归一化闭眼阈值、最少开眼样本数、目标帧率与跟踪置信度阈值，允许在不同 App 中按场景低成本复用同一检测器。
+- `AispectBlinkDetector`：新增 `prepare()` 与 `suspend()` 生命周期接口，页面可见时提前预热前置相机会话并进入低帧率待机，用户真正触发检测时仅切换到高帧率检测窗口，检测结束后自动回到待机态，而不是每次重新冷启动整条链路。
+- `AispectBlinkDetector.Config`：新增 `idleVisionFrameRate`，用于把页面常驻阶段的 Vision 待机帧率压到低功耗档位。
+- `AispectBlinkDetector`：新增 `onPrepareLatency`、`onFaceLockLatency`、`onDecisionLatency` 指标回调，分别记录页面预热完成、第一次拿到有效眼部特征、以及最终给出眨眼判定的时延，便于区分瓶颈到底在相机预热、锁脸还是判定窗口。
+- `AispectBlinkDetector`：根据真机观测结果，将 Vision 检测窗口从过于保守的“重平滑 + 180ms 保持”改为“20fps 检测帧率 + 80ms 闭眼保持 + 回滞阈值”的更敏捷判定策略，避免正常或轻微刻意闭眼还未穿过阈值就直接超时失败。
+- `AispectBlinkDetector`：Vision 判定改为优先使用“原始归一化开眼比与轻平滑结果的较小值”作为闭眼依据，并仅在重新明显睁眼时更新开眼基线，减少平滑滞后和闭眼期间基线被拖低的问题。
+- `AispectBlinkDetector.Config`：继续把检测窗口往低延迟方向推进，默认改为 `30fps` 检测帧率、`2` 个开眼样本即可建立基线、`60ms` 常规闭眼保持，并新增 `visionStrongClosedEyeRatioThreshold` 与 `visionStrongBlinkHoldDuration`，让“明显双眼闭合”可以走更短的快速命中路径。
+- `AispectBlinkDetector`：缓存 Vision 图像方向并在 `start/prepare` 等低频入口刷新，移除后台视频队列每帧同步到主线程读取界面方向的开销，减少高频帧处理阻塞。
+- `AispectBlinkDetector`：检测态帧率切换改为自动协商到设备当前格式最接近的受支持值，不再要求“精确等于 30fps”才允许升频，避免部分机型因只暴露 `29.97fps` 等区间而停留在低帧率待机档。
+- `AispectBlinkDetector`：`face lock` 延迟改为在第一次拿到有效眼部特征时立刻记账，不再等开眼基线完全稳定后才上报，便于更准确地区分“锁脸”和“判定窗口”两类瓶颈。
+- `AispectBlinkDetector`：视频帧处理改为包在 `autoreleasepool` 内执行，降低高频 Vision 请求带来的临时对象堆积风险，尽量维持检测窗口尾延迟稳定。
+- `AispectBlinkDetector.Config` / `handleVisionObservation`：关键阈值与保持时长旁边补充了中文调参注释，直接说明“调大/调小会怎样”，方便在 Xcode 里围绕误判偏高或判定偏慢做手工微调。
+- `AispectBlinkDetector.Config`：新增 `usesVisionStrongBlinkFastPath` 与 `visionRawRatioWeight`，排查阶段默认关闭强闭眼快速通道，并把原始比值与平滑比值改为中性加权融合，避免 `min(raw, smoothed)` 系统性偏向“更闭眼”。
+- `AispectBlinkDetector.DebugSnapshot`：新增闭眼调试快照回调，实时暴露基线、原始比值、融合比值以及 `isClosed/isStronglyClosed` 状态，便于区分“阈值太松”和“融合/基线逻辑有偏”。
+- `AispectImpactTestView` / `RootViewController`：测试面板新增 `blink debug` 两行调试文本，真机上可直接看到 `base/raw/eff/max` 关键值，而不必每次盲调后只看“是/否”。
+- `AispectBlinkDetector`：预热期基线新增异常值过滤、左右眼对称性校验、坏基线自恢复与更快的向下回收策略，避免一次异常 landmarks 帧把 `left/right eye baseline` 抬到明显失真的高值，进而导致后续“不闭眼也判成是”。
+- `AispectBlinkDetector`：眼部开合度计算从“眼轮廓包围盒高宽比”替换为基于眼轮廓点顺序重建上下眼睑后的点距 `EAR`，用两组上下点距对左右眼角宽度归一化，降低单个离群 landmarks 点、ROI 漂移和包围盒异常扩张对闭眼判定的污染。
+- `AispectBlinkDetector`：修复预热态的重大逻辑缺陷，`prepare()` 期间只保活前置相机与人脸链路，不再在 `idle` 态累计可复用闭眼基线；`start()` 切入正式检测时会清空旧基线并按当前用户这轮样本重建，避免“只要预热阶段有人脸路过，后续就整轮判定漂移”。
 - `AispectImpactTestView`：测试面板新增闭眼检测延迟、状态与结果显示。
-- `Localizable.strings`：新增闭眼检测状态与延迟格式的中文资源文案。
+- `AispectImpactTestView`：闭眼调试区扩展为“预热延迟 / 首帧延迟 / 锁脸延迟 / 判定延迟 / 状态 / 结果”六行诊断信息，方便真机上直接对比预热前后收益。
+- `Localizable.strings`：补充相机权限被拒绝时的闭眼检测状态文案。
+- `Localizable.strings`：新增预热、首帧、锁脸、判定四类延迟的中文格式化文案。
+- `ZHIFAeyes.xcodeproj`：相机权限说明文案更新为“前置相机用于闭眼检测”，与当前 Vision 主链实现保持一致。
+- `RootViewController`：在页面 `viewDidAppear` 时预热闭眼检测器，在 `viewDidDisappear` 时挂起相机会话，避免离页后仍持续占用功耗。
 
 ## 触摸结束偏移补充
 - `AispectTouchEvent.liftOffset`：记录触摸结束时的抬起偏移距离，用于在未命中冲击时辅助判定 heavyTap，并在测试面板展示。
@@ -13,7 +36,7 @@
 - `MessageListLayoutSnapshot` / `VirtualListLayoutSnapshot`：用于根据滚动偏移与固定度量计算元素位置，供连线系统使用。
 - `FloatingHomeContainerView`：悬浮式主页容器，支持 iOS 风格圆角、边框与毛玻璃材质；当作为全屏根容器使用时可切换到 `edgeToEdge` 样式，关闭圆角、边框与阴影，避免根层视觉缩边。
 - `RootViewController` / `safeContentGuide`：主页主容器铺满整个屏幕，根控制器底色统一为黑色；主内容依赖独立的安全区布局 guide，而不是依赖装饰性容器自身的安全区，符合 iPhone 全屏背景与内容避让分层的常见做法。
-- `zhifaIOSApp`：SwiftUI 入口使用全屏黑色底板包裹 `ContentView`，用于兜住 UIKit 宿主层尚未完成布局时的背景色，避免安全区先露出白底。
+- `ZHIFAeyesApp`：SwiftUI 入口使用全屏黑色底板包裹 `ContentView`，用于兜住 UIKit 宿主层尚未完成布局时的背景色，避免安全区先露出白底。
 - `GlassMaterialView`：统一玻璃材质背景，使用系统语义化模糊、细边框与轻阴影，避免手动透明度渲染。
 - `MeshGradientBackgroundView`：SwiftUI 承载 MeshGradient 的背景视图；当前背景层已统一改为纯黑底，低版本兜底层与 iOS 18+ 的 MeshGradient 颜色均收敛为黑色，便于作为全屏暗色背景基底。
 - `MeshGradientDriver`：MeshGradient 驱动对象，接收触摸位置与压力并联动网格顶点。
@@ -43,8 +66,80 @@
 - `AispectImpactTestView`：测试面板新增滚动容器与折叠按钮，内容过长时可纵向滚动查看，并可收起为右上角小按钮，避免在 iPhone 上遮挡主交互区域。
 - `RootViewController` / `AispectImpactTestView`：测试面板展开态最大高度会按当前安全区动态限制，防止整块面板超出屏幕导致回弹异常，保证滚动只发生在面板内部。
 - `Localizable.strings`：补充冲击测试面板与采集器的中文资源，完成手机端展示汉化。
-- `zhifaIOS.xcodeproj`：补充 `NSMotionUsageDescription`，允许真机上请求系统运动与健身权限，采集 walking/static 的系统侧证据。
+- `ZHIFAeyes.xcodeproj`：补充 `NSMotionUsageDescription`，允许真机上请求系统运动与健身权限，采集 walking/static 的系统侧证据；当前工程名、Target、产品名与入口文件已统一重命名为 `ZHIFAeyes`。
 - 采集数据目录：默认写入 App 沙盒 `Documents/AispectImpactDataset`，每条样本单独保存为 JSON，便于后续批量导出到训练脚本。
+
+## Android 移植与采集补充
+- `android/`：新增独立 Android 多模块工程，包含可复用库模块 `aispect-core` 与采集示例 App；当前迁移范围排除声学与闭眼相机链路，优先落地触摸采集、IMU 窗口、设备能力画像、CNN 诊断与 JSON 落盘。
+- `AispectCollectionController`：Android 采集主入口，宿主 View 只需把 `MotionEvent` 与控件宽高传入 `handleMotionEvent`，即可完成单次触摸的原始触摸帧、事件流、IMU 后置窗口、设备能力、CNN 诊断与训练样本保存。
+- `AispectTouchFrame` / `AispectTouchAxisReader`：采集 Android 系统公开触摸底层字段，优先使用 `MotionEvent` 标准 axis，兼容读取 `AXIS_TOUCH_MAJOR`、`AXIS_TOUCH_MINOR`、`AXIS_TOOL_MAJOR`、`AXIS_TOOL_MINOR`、`AXIS_PRESSURE`、`AXIS_SIZE`、`AXIS_ORIENTATION`，并回退到 `getTouchMajor/getTouchMinor/getToolMajor/getToolMinor/getPressure/getSize/getOrientation` 便捷接口。
+- `AispectDeviceCapabilityProfiler`：基于 `InputDevice.MotionRange` 与实际采样值生成 Level A/B/C 能力画像；Level A 表示具备 major 且有 minor/pressure/size/orientation 等增强字段，Level B 表示只有 major 或近似半径，Level C 表示无可靠触摸半径并回退到通用 IMU/坐标/时间通道。
+- `AispectContactPatch`：把 Android 触摸椭圆归一化为跨设备接触 patch；当 major/minor 可用时使用椭圆协方差，当只有 major 或 toolMajor 时转为近似圆形半径，当所有半径字段不可用时使用默认小 patch 并记录 `defaultApplied`，避免训练 schema 断裂。
+- `AispectContactEncodingProfile`：新增真正面向 CNN 输入设计的 Contact Patch 三方案编码，包含 `gaussian_map`、`multi_channel`、`covariance_matrix`。其中二维高斯方案输出固定 `9x9` 接触热图，缺失半径时使用默认 `sigma = 12px` 且 `validMask = 0`；多通道方案输出中心、major、minor、orientation 与 valid mask；协方差方案输出 `x/y/cov_11/cov_12/cov_22/validMask`。每条新 Android 样本会同时写入三套编码，面板按钮只标记本轮主方案，便于后续离线横向比对。
+- `AispectTouchNormalizationEngine` / `AispectTouchNormalizationProfile`：Android 触摸归一化新增三套可切换方案，分别为屏幕比例归一化、接触椭圆协方差矩阵归一化、本轮历史基线相对归一化；采集面板允许在采集关闭时切换当前方案，训练样本 JSON 会同时写入 `screenScale`、`covarianceMatrix`、`sessionBaseline`、设备内分位诊断、短期历史偏移诊断、字段质量标记与 `contactPatch`，便于后续离线对比哪套方案更优。
+- `AispectImpactSignalCollector` / `AispectSignalWindowBuilder`：使用 `Sensor.TYPE_LINEAR_ACCELERATION` 优先、`TYPE_ACCELEROMETER` 兜底，并同步采集 gyroscope 与 gravity；Android 目标采样周期调整为 4167us，尽量贴近 iOS 240Hz 冲击采样；触摸结束后按 anchor timestamp 构造 `preFrames/postFrames` 短窗口，默认兼容 iOS `-5...+15` 窗口。
+- `AispectImpactSignalCollector` / `AndroidManifest.xml`：补充 Android 12+ 高频传感器权限 `HIGH_SAMPLING_RATE_SENSORS`，并在注册 4167us 采样失败时按 10000us、16667us、`SENSOR_DELAY_GAME`、`SENSOR_DELAY_UI` 逐级降级，避免小米 Android 15 因高频 IMU 注册抛出 `SecurityException` 导致点击采集开关闪退。
+- `AispectImpactCNNClassifier`：Android 侧内置纯 Java 1D CNN 推理器，支持当前 iOS 4 通道模型与旧触控包内多组 `g11/g13_time` 模型；新增 `ModelInfo`、`availableModels()`、`modelInfoForId()` 与 catalog 加载缓存，宿主可以显示真实模型列表并指定模型执行诊断推理。推理特征读取已扩展到 `contactPatch.cov_11/cov_12/cov_22`、`sigmaX/sigmaY`、`touchNormalization.rawMajorPx/rawMinorPx/areaValue/confidence`，用于后续 22 通道 Android CNN 权重回装。
+- `AispectImpactCNNClassifier`：补齐 Contact Patch 三方案 CNN 输入的手机端同名特征读取，支持 `gaussian.map.00...80`、`gaussian.center/sum/energy/spread/sigma_x_px/sigma_y_px/valid_mask`、`multi.center_x_norm/center_y_norm/major_px/minor_px/orientation_rad/valid_mask`、`covariance.x_norm/y_norm/cov_11/cov_12/cov_22/valid_mask`。推理时优先使用 `AispectContactEncodingProfile` 的三套结果，缺失时按默认 `sigma = 12px` 与 `validMask = 0` 兜底；缺失 IMU 帧与训练脚本保持一致按零帧补齐，避免训练可用而手机端不出结果。
+- `AispectImpactCNNClassifier`：关键输入链路已补充中文注释，明确手机端必须按训练导出的 `featureNames` 顺序取值、缺失时间帧补零、高斯热图缺失时重建、默认 `sigma` 只作占位且由 `validMask` 表达可信度，避免后续复用模块时误把 `confidence` 当成力度标签。
+- `AispectImpactCNNClassifier`：新增 Android 全量原始数据前五窗口 22 通道 CNN 模型，包含 `android_patch22_pre5_post9`、`android_patch22_pre5_post6`、`android_patch22_pre5_post10`、`android_patch22_pre5_post0` 与 `android_patch22_pre5_post7`；旧 `g13_time` 模型继续作为 catalog 后续可选项保留。
+- `AispectImpactCNNClassifier`：二分类默认回装模型切到 `android_patch21_no_confidence_pre5_post9`，输入为 `enhanced_patch21_no_confidence` 的 21 通道 `-5...+9` 窗口，不再把 `touchNormalization.confidence` 作为训练或推理通道；当前权重使用全量 high_quality 清单训练，并将大面积轻触 hard negative 加权为 3.0。旧 `android_patch22_pre5_post9` 仍留在 catalog 中便于手机端手动切换对照。
+- `AispectImpactCNNClassifier` / `AispectModels.ImpactPrediction`：端侧 CNN 推理从固定二分类输出扩展为读取 scaler 中的 `classCount` 与 `labelOrder`，支持二分类 heavy/light 与四分类 `thumb_light/thumb_heavy/index_light/index_heavy` 共用同一套模型切换、推理和 JSON 诊断落盘；旧 `heavyProbability/lightProbability/isHeavy()` 字段继续保留作为二分类兼容接口。
+- `AispectImpactCNNModelCatalog.json`：新增并置顶拇指/食指轻重点四分类消融前五模型，依次为 `old13_raw_radius`、`old13_multichannel`、`enhanced_patch22`、`old13_gaussian_summary` 与 `enhanced_patch21_no_confidence`，手机端默认选中第一名并可在面板中继续热切换。
+- `AispectImpactCNNModelCatalog.json`：新增并置顶基于 `lemon + tao` 两人全量 30214 条样本重新训练的四分类消融前五模型，依次为 `enhanced_patch21_no_confidence`、`enhanced_patch22`、`old13_multichannel`、`old13_gaussian_summary` 与 `old13_raw_radius`；旧四分类与二分类模型仍保留在 catalog 后面，可继续在手机端手动切换对照。
+- `data/` / `models/` / `.gitattributes`：GitHub 上传结构按数据、模型、报告和代码分层整理；`lemon` 与 `tao` 展开 JSON 目录保留为本地工作副本，上传时使用 `data/lemon` 与 `data/tao` 下的压缩包，CNN 权重、scaler、数据压缩包与 manifest CSV 通过 Git LFS 跟踪。`android/local.properties`、展开原始目录和 `android/analysis/results` 完整消融中间结果不进入 Git；可复查的精简结果以 `models/reports`、`models/lemon_tao_full4_top5` 与 `data/manifests` 为准。
+- `AispectImpactCNNModelCatalog.json`：新增并置顶 OnePlus PHK110 设备专属四分类时间留出优先模型 `oneplus_four_class_hard_core_old13`，基于当前手机 `handheld_static` 四类 high_quality + review hard 样本平衡训练，并按每类最新 25% 做时间留出复核。随机切分第一名 `old13_raw_radius` 在时间留出下暴露食指/拇指混淆，`old13` 时间留出平衡准确率约 `91.67%` 且 `index_light` 召回约 `93.9%`，因此端侧四分类默认模型切到 `old13`，`old13_raw_radius` 保留为 catalog 第二项用于对照。
+- `AispectImpactCNNModelCatalog.json`：新增并置顶补采后 OnePlus 四分类装机模型 `oneplus_four_class_after_recollect_hard_nearfull_old13_raw_radius`，并保留 `oneplus_four_class_after_recollect_hard_temporal10_old13_raw_radius` 作为第二项对照。模型选择基于手机当前 `4641` 条原生 JSON 重新清洗后的 hard 平衡集，每类 `321` 条；严格每类最新 `25%` 时间留出显示分布漂移仍很强，最佳仅约 `71.56%` 平衡准确率，因此只作为自我批判指标。用于选择 preset 的 `10%` 最新尾段留出中，`old13_raw_radius` 平衡准确率约 `88.28%`，四类召回约 `thumb_light 75.0% / thumb_heavy 96.9% / index_light 90.6% / index_heavy 90.6%`，同强度轻触互混 `7` 次、重触互混 `1` 次；当前端侧默认四分类模型使用同一 preset 的 nearfull 训练版，训练集中每类 `320` 条，剩余每类 `1` 条仅用于导出健康检查。
+- `AispectImpactCNNModelCatalog.json`：修复四分类训练脚本未真正使用 `sample_weight` 的问题后，新增并置顶 weighted 装机模型 `oneplus_four_class_after_recollect_hard_nearfull_weighted_old13_multichannel`，并保留 `oneplus_four_class_after_recollect_hard_temporal10_weighted_old13_multichannel` 作为第二项评估对照。weighted `10%` 最新尾段核心消融中，`old13_multichannel` 平衡准确率约 `87.50%`、最小召回约 `81.25%`，四类召回约 `thumb_light 84.4% / thumb_heavy 90.6% / index_light 93.8% / index_heavy 81.2%`，同强度轻触互混 `6` 次、重触互混 `0` 次；相较 raw radius，牺牲少量总分但降低半径单点依赖并改善最弱类，因此端侧默认四分类模型切到 weighted multichannel nearfull 版。
+- `AispectCollectionController`：新增当前 CNN 模型选择状态；屏幕验证推理优先使用用户选中的模型，失败时再回退自动选择策略。`Status` 同步输出最后一次触摸事件、最近采样率、冲击窗口 `maxAbsDelta` 与完整窗口日志，供 Android 面板复刻 iOS 的实时事件行和 `impact delta window` 日志显示。触摸结束后会先生成 `contactPatch` 与三套触摸归一化画像，再把它们传入 CNN 推理器，保证增强模型可以真正吃到触摸半径和协方差输入；训练 JSON 落盘时不写入 CNN 预测。
+- `AispectModels.ImpactPrediction` / `AispectCollectionController`：二分类 heavy 输出新增端侧证据约束，CNN 判为 `heavy` 后仍需满足足够冲击 `maxAbsDelta`，并同时具备持续形态变化或时间动态证据；接触面积、半径、字段质量和归一化置信度不能单独把一次触摸推出重触。证据不足时二分类结果会降级为 light，四分类模型输出保持原有标签分布用于验证和切换。
+- `AispectCollectionController` / `MainActivity`：CNN 模型切换改为手机端热切换，训练采集开关打开后仍可在两次触摸之间切换“下一次触摸”使用的模型；单次触摸开始时会锁定当时的 `activeModelId`，避免一条样本中途换模型导致诊断结果不可追溯。标签、运动场景与接触编码仍按采集任务锁定，保证训练真值稳定。
+- `MainActivity`：CNN 诊断显示改为固定高度方框，稳定展示模型、最高预测、置信度和人工标签，不再因为概率列表或行数变化撑开布局；人工标签占位符与传参顺序同步修正为手指、轻重点、场景，四分类模型继续展示预测类别，旧二分类模型继续显示轻点/重点输出，模型切换面板仍沿用现有上一项/下一项交互。
+- `MainActivity`：采集教程区域固定为五行高度并顶部对齐，采集开关切换导致教程文案从 `1...5` 变成锁定说明时，不再改变后续采集状态、原生样本、CNN 诊断和四分类验证框的位置。
+- `MainActivity`：采集面板新增“四分类验证”显示框，验证模式开启后持续显示并累计 `thumb_light/thumb_heavy/index_light/index_heavy` 四类 `correct/total/recall`、macro recall 与总体 accuracy；训练采集开关打开时仍保存原生训练 JSON，同时也会把完成预测计入验证统计。
+- `MainActivity`：新增“验证模式”开关，默认开启；面板外触摸会直接显示人工标签、CNN 输出、对错、置信度、当前组合统计、四类召回、macro recall 与总体 accuracy，用于实时观察当前模型准确性。
+- `AispectCollectionController` / `MainActivity`：四分类召回统计新增完成预测序号 `latestPredictionSequence` 作为去重键，并接受 `collector_diagnostic_ready` 与 `collector_event_saved` 两类完成状态进入计数；新一轮 `ACTION_DOWN`、采集开关切换、标签切换、模型切换或编码方案切换只清空上一轮预测快照，不清空累计统计，避免同一条预测重复计数又保留跨开关/跨模型的连续验证总量。训练样本落盘口径不变，采集开关开启时仍把每次面板外触摸按当前人工标签保存为 accepted 样本。
+- `MainActivity`：面板常驻区域隐藏冲击窗口日志、复制日志按钮和接触编码明细数据，避免长窗口文本挤占四分类验证数据显示空间。
+- `AispectCollectionController` / `MainActivity`：训练采集改为无触觉反馈、无红色冲击闪屏、无 CNN 预测落盘；`cnnPrediction` 只用于屏幕验证显示，不写入训练 JSON，确保导出的训练数据只包含人工标签、原始触摸帧、IMU 窗口、设备能力、Contact Patch 与接触编码等原生字段。面板新增“最近原生样本”摘要，显示刚保存样本的人工标签、触摸帧数、窗口帧数、采样率、`maxDelta`、major/minor/pressure 和文件名。
+- `zhifaIOS_old.app` 适配：Android assets 已接入 `/Users/xueyin/Desktop/zhifaIOS_old.app` 内的旧触控 CNN 模型 catalog 与多组 `g11/g13_time` 权重；示例 App 默认选中旧包中的 `g13_time_f14_pre4_post9` 增强模型，并允许手动切换 catalog 内 8 个模型。旧包中的 iOS Mach-O 可执行文件不能直接移植到 Android，683MB 的训练数据导出文件也不打入 APK。
+- `AispectDataLogger`：默认把 Android 训练样本写入 App 外部私有 Documents 下的 `AispectAndroidDataset`，样本 JSON 包含 `touchFrames` 原始触摸字段、`deviceCapability`、`contactPatch`、`contactEncoding`、对齐后的 `frames` 与 `motionSignal`；训练采集路径不写入 `cnnPrediction`，避免模型输出反向污染训练集。
+- `AispectDataLogger` / `AispectCollectionController`：Android 采集落盘口径改为“采集阶段不判断有效/无效”，所有面板外触摸结束路径都会按当前人工选择的运动状态、轻重点与手指类型保存为 `recordStatus = accepted` 的训练样本；拖动、取消、偏移等行为不再由手机端丢弃或标成 rejected。控制器同时增加单次触摸保存闸门，同一轮 `ACTION_DOWN` 后即使系统连续派发多个结束类事件，也只会安排一次落盘，避免一次按压生成多条样本。
+- `MainActivity`：Android 示例 App 改为复刻旧 iOS 的全屏主界面 + 左上悬浮 `AispectImpactTestView` 面板结构；面板展开宽度对齐 iOS 的 204pt 结构，收起态为 132x64 可点击小面板，采集控件从大按钮改为 switch，冲击阈值区域补齐 slider 与格式化阈值文本。面板负责“冲击测试”“CNN 模型切换”“训练数据采集”、上一项/下一项模型切换、采集开关、三档运动场景、轻点/重点、引导文案、状态日志、CNN 推理结果与数据目录复制。训练采集开启后，`dispatchTouchEvent` 以 ACTION_DOWN 是否在面板外为准锁定本轮全屏采集，MOVE/UP/CANCEL 即使经过面板上方也继续送入采集链路，不再限制在底部采集框；收起/展开切换在 `dispatchTouchEvent` 最前面使用独立热区优先响应，收起态按整块小面板命中，展开态按面板顶部 58dp 命中，热区额外外扩 36dp，避免被全屏采集或按钮自身命中区影响。
+- `MainActivity` / `DemoHomeView`：触摸反馈收敛为中性触摸环，只按原始触摸半径/面积改变大小，不触发振动、红色重触提示或全屏冲击闪烁，避免采集时把 App 反馈混进用户动作和 IMU 数据。
+- `MainActivity`：训练采集期间将人工选择的 `label.touchStrength` 与 CNN 验证显示彻底区分。样本真值始终来自采集面板锁定的轻点/重点标签；CNN 输出仅用于屏幕验证，不写入训练 JSON，也不作为最终识别文案。
+- `AispectCollectionController`：Android 训练采集在触摸结束时把 `LIGHT_TAP/HEAVY_TAP` 统一重写为本轮锁定的人工标签，`sourceTouchKind` 与 `touchEvents` 最后一条结束事件都会同步为 `lightTap` 或 `heavyTap`，避免轻点样本因底层抬起偏移偶发被记录成重点。
+- `MainActivity` / `DemoHomeView`：训练阶段默认关闭旧 CNN 实时诊断，结果区显示“训练阶段旧 CNN 已关闭”和当前人工训练标签；轻点采集开启时同时压低触摸环视觉强度，避免半径波动在界面上产生红色重触反馈错觉。
+- `MainActivity` / `DemoHomeView`：Android 背景从假消息列表清理为训练采集底板，保留暗色渐变、采集区域边界、轻量网格、中心准星、当前采集状态与触摸环，去掉与训练无关的会话和输入框装饰。
+- `MainActivity`：悬浮面板切换改为只响应明确的收起/测试按钮命中，收起态缩小为 `88x42dp` 并放在右上侧，展开态不再让整条标题栏或整块面板触发收起，减少采集区测试时误触面板。
+- `MainActivity`：修复展开面板滚动后收起按钮可能被单独提升到面板底部的问题，切换时只提升整个面板层级，不再改变按钮在 `LinearLayout` 内的顺序，保证收起/测试按钮位置稳定。
+- `AispectModels.DatasetLabel` / `MainActivity`：Android 训练采集标签从“运动状态 + 轻重触控”扩展为“运动状态 + 轻重触控 + 手指类型”，当前支持 `thumb` 与 `index`。采集面板新增“拇指 / 食指”分段按钮，采集开关开启后与运动状态、轻重点一同锁定；新样本 JSON 的 `label.fingerType` 与文件名 `datasetKey` 会保留该维度，方便后续按拇指/食指分别训练或评估。
+- `AispectCollectionController` / `MainActivity`：新增采集关闭状态下的验证诊断入口。验证模式默认开启，用户不打开训练采集开关也能在全屏触摸区触发一次 CNN 推理；控制器会临时启动 IMU、收集触摸窗口、生成 Contact Patch 与归一化画像、调用当前选中模型输出四分类结果，但不会调用 `AispectDataLogger.writeSample()`，因此不会写入训练 JSON。
+- `MainActivity`：验证面板显示当前四分类模型输出、置信度、四类概率、人工标签对比和四类召回统计。统计口径使用面板当前选择的 `thumb/index + light/heavy` 作为人工答案，只在训练采集关闭时生效，适合快速观察“当前模型在手机上是否按预期识别”，不替代离线留出集评估。
+- `MainActivity`：扩大测试面板收起/展开按钮和收起态小面板尺寸，按钮热区外扩到 22dp，降低全屏采集时误触或点不中面板切换的概率。
+- `android/analysis/clean_android_touch_dataset.py`：新增 Android 采集数据清洗工具，读取真机导出的 JSON 样本后生成 `manifest.csv`、`train_manifest.csv`、`balanced_train_manifest.csv` 与 `summary.json`，并可按 `high_quality/review/rejected` 三层复制样本。清洗真值只使用面板里人工选择的 `label.touchStrength`，不再把 `sourceTouchKind` 或旧 CNN 输出当训练标签；旧 CNN 几乎全判 heavy 的现象会写入 `quality_warnings`，只作旧模型失效诊断。manifest 额外输出 `sample_weight`，把近期大面积轻触和 `light_label_heavy_shape` 样本作为 hard negative 加权进入训练，其中大面积轻触同时支持固定阈值和轻触分布 p90 阈值。
+- `android/analysis/clean_android_touch_dataset.py`：manifest 增加 `finger_type` 列，新样本按 `thumb/index` 进入 `label_id`；历史样本缺少 `label.fingerType` 时默认按 `thumb` 读取，避免旧数据在训练视图中落入 `unknown` 类。
+- `android/analysis/mark_android_history_thumb.py`：历史 Android 样本手指标签补标脚本，按结构化 JSON/CSV 解析补齐 `label.fingerType = thumb`、`finger_type` 列与带 `_thumb` 的标签名；当前已用于本地 `9185` 条唯一原始样本及其展开整理副本，保持旧采集数据明确归类为拇指。
+- `android/analysis/build_android_finger_four_class_dataset.py`：从手机全量 raw 与旧拇指基准目录构建手指四分类数据集，按文件差集将旧样本视为 `thumb`、新增样本视为 `index`，并默认限定同一运动场景后按 `thumb_light/thumb_heavy/index_light/index_heavy` 四类抽取均衡 manifest 与可独立训练的 JSON 副本。当前脚本也支持直接读取清洗后的 `source manifest` 与 `quality_buckets`，优先使用 manifest/JSON 中的 `finger_type`，只有旧样本缺失手指字段时才回退到文件名或参考目录推断，避免补采样本被二次误标。
+- `android/analysis/train_android_finger_four_class_cnn.py`：新增四分类 CNN 训练入口，复用现有 `enhanced_patch22` 特征提取和 `-5...+9` 时间窗口，输出四类顺序、权重、scaler 与训练报告；当前导出结果标明需要手机端推理器支持四类输出后才能直接部署到端侧。训练入口新增 `split_strategy`，支持随机分层切分与按每类 `created_at` 最新样本留出的 temporal 切分，后续默认用 temporal 结果审计连续采集造成的验证泄漏。四分类训练现在会读取 manifest 的 `sample_weight` 并使用 `CrossEntropyLoss(reduction="none")`，确保大面积轻触 hard negative 的权重真正进入损失函数，而不是只存在于 CSV 中。
+- `android/analysis/run_android_finger_four_class_cnn_ablation.py`：新增拇指/食指轻重点四分类正式 CNN 全量消融脚本，固定同一四分类 manifest、`-5...+9` 时间窗口、训练参数与随机种子，逐个调用 `train_android_finger_four_class_cnn.py` 训练 `old13`、raw 半径、多通道、协方差、高斯热图和 22 通道等 12 个 preset，并汇总通道数、四类召回、验证准确率、验证平衡准确率、最小召回与混淆矩阵到 `finger_four_class_cnn_ablation_summary.csv` 和 `finger_four_class_cnn_ablation_report.json`。消融入口同步透传 `split_strategy`，使 preset 排名可以直接基于时间留出，而不是只看随机验证。
+- `android/analysis/train_android_touch_cnn.py`：面向 Android 的 CNN 训练导出脚本，读取清洗后的训练 manifest，默认使用 `enhanced_patch21_no_confidence` 输入预设。该预设在旧 `old13` 的坐标、IMU 与时间通道基础上，追加 `patch9` 中除 `touchNormalization.confidence` 之外的接触协方差、归一化半径与面积通道，并导出 `AispectImpactCNNWeights_*.json`、`AispectImpactCNNScaler_*.json`、训练报告和 catalog 项；导出的类别顺序保持 `heavy/light`，便于直接接入现有 `AispectImpactCNNClassifier`。
+- `android/analysis/train_android_touch_cnn.py`：正式接入 Contact Patch 三方案作为 CNN 训练预设，新增 `old13_raw_radius`、`old13_covariance`、`old13_multichannel`、`old13_gaussian_summary`、`old13_gaussian_map9x9`、`gaussian_map9x9_only`、`multichannel_only`、`covariance_only` 与 `enhanced_patch21_no_confidence`。历史 JSON 若没有 `contactEncoding` 字段，会直接从 `touchFrames` 原始触摸字段重建二维高斯、多通道与协方差输入；半径缺失时使用默认接触区域并通过 `validMask` 标记未知，不删除样本。
+- `android/analysis/train_android_touch_cnn.py`：训练预设、缺帧策略、Contact Patch 重建、`confidence` 语义和导出元数据处已补充中文注释，说明 `old13` 是动态基线、`patch9` 是探索集合、`enhanced_patch21_no_confidence` 用于排查流程偏置，便于后续缩减通道时保持训练端和手机端一致。
+- `android/analysis/export_android_touch_feature_report.py`：新增不依赖 PyTorch 的增强特征报告脚本，读取 `balanced_train_manifest.csv` 后输出 `enhanced_patch_feature_report.json`、`enhanced_patch_feature_summary.csv`、`enhanced_patch_threshold_scan.csv` 与样本预览。报告用于在正式训练 CNN 前确认 `rawMajor/rawMinor`、`cov_11/cov_22`、`sigmaX/sigmaY`、三套归一化面积等通道对轻点/重点是否已有可学习差异。
+- `android/analysis/export_android_contact_encoding_report.py`：新增不依赖 PyTorch 的 Contact Patch 三方案比对脚本，直接从历史 JSON 的 `touchFrames` 原始字段重建二维高斯热图、多通道表示与协方差矩阵表示，输出 `contact_encoding_report.json`、`contact_encoding_samples.csv`、`contact_encoding_summary.csv` 和 `contact_encoding_threshold_scan.csv`。
+- `android/analysis/run_android_touch_ablation.py`：新增不依赖外部 Python 包的 Android 触摸训练级消融脚本，读取清洗后的 `balanced_train_manifest.csv`，固定同一批 train/valid 划分，对 `old13`、`old13_raw_radius`、`old13_covariance`、`old13_multichannel`、`old13_gaussian_summary`、`old13_gaussian_map9x9`、`patch9_only`、`enhanced_patch21_no_confidence` 与 `enhanced_patch22` 执行多 seed 的 diagonal LDA probe，并输出 `ablation_runs.csv`、`ablation_summary.csv`、`ablation_predictions.csv` 与 `ablation_report.json`。该脚本用于在 PyTorch 不可用时先验证各输入组的训练/验证贡献，不替代最终 CNN 权重训练。
+- `android/analysis/run_android_touch_cnn_ablation.py`：新增正式 CNN 全量消融批跑脚本，按同一 manifest、同一窗口、同一训练参数逐个调用 `train_android_touch_cnn.py`，对 `old13`、高斯热图、多通道、协方差、当前 22 通道等预设训练真实 1D CNN，并汇总每个 preset 的通道数、训练/验证准确率、平衡准确率、轻重召回和混淆矩阵到 `cnn_ablation_summary.csv` 与 `cnn_ablation_report.json`。
+- `android/analysis/train_android_touch_cnn.py`：训练脚本新增自动设备选择，优先使用 CUDA，其次使用 Apple Silicon 的 MPS，最后回退 CPU；模型、输入张量和类别权重会统一放到同一设备上，评估结果再转回 CPU 统计，避免 Mac 本机训练被迫退回纯 CPU。
+- `android/analysis/train_android_finger_four_class_cnn.py`：四分类训练脚本同步接入自动设备选择，支持在已完成 preset 基础上继续断点式恢复全量消融，并直接复用同一套 MPS/CUDA/CPU 设备逻辑。
+- `android/analysis/train_android_finger_four_class_cnn.py`：四分类训练入口同步适配二分类训练器新增的 `sample_weight` 版 `train_one_epoch` 接口，默认给四分类样本使用权重 `1.0`，避免全量四分类消融在第一项训练时因接口不一致中断。
+- `android/analysis/datasets/oneplus_20260625_phone_pull`：保存当前 OnePlus PHK110 手机导出的 `3374` 条原生训练 JSON、`clean_v1` 清洗结果、`finger_four_class_handheld_clean_v1` 与 `finger_four_class_handheld_hard_v1` 两套手持四分类平衡 manifest，以及 clean/hard 两轮核心 CNN 消融报告。hard 版本每类 `264` 条，包含 review 中的大位移/高冲击边界样本，用于比只取 clean 的每类 `116` 条更贴近真实操作。
+- `android/analysis/datasets/oneplus_20260625_phone_pull/finger_four_class_temporal_holdout_v1`：新增 OnePlus 四分类时间留出复核报告。该报告指出当前四类数据按长段连续采集，随机切分会把同一操作段同时放入训练和验证，导致 `old13_raw_radius` 的随机 `97.35%` 被高估；时间留出下 `old13_raw_radius` 掉到约 `86.36%`，主要混淆 `index_light` 与 `thumb_light`，因此后续模型选择必须优先看时间/会话留出和同强度手指混淆矩阵。
+- `android/analysis/datasets/oneplus_20260625_after_recollect`：保存本轮补采后从 OnePlus PHK110 导出的 `4641` 条原生 JSON、`clean_v1` 清洗结果、`finger_four_class_handheld_clean_v2` 与 `finger_four_class_handheld_hard_v2` 平衡 manifest。hard_v2 使用 `handheld_static` 的 high_quality + review 样本，每类 `321` 条，并生成 `finger_four_class_cnn_ablation_hard_temporal_v2` 与 `finger_four_class_cnn_ablation_hard_temporal10_v2` 两套时间留出消融报告；其中严格 `25%` 留出用于揭示采集顺序分布漂移，`10%` 最新尾段留出用于当前装机模型选择。
+- `android/analysis/run_android_patch9_subset_ablation.py`：新增 `patch9` 接触通道组合穷举脚本，固定旧 13 通道和同一时间窗口，对 9 个接触通道的 `511` 个非空子集执行多 seed diagonal LDA probe，输出 `patch9_subset_runs.csv`、`patch9_subset_summary.csv` 与 `patch9_subset_report.json`。该脚本用于筛选“通道数少、信息覆盖完整、性能接近最优”的候选组合，再交给正式 CNN 复训。
+- `android/analysis/audit_android_contact_bias.py`：新增接触面积偏置审计脚本，读取清洗 manifest 后自动按最新 `created_at` 回看最近窗口，统计二分类和四分类 CNN 预测在轻/重触维度上的混淆、大接触轻触误判、接触半径/面积/冲击 delta 与重触输出的相关性，并导出最近样本与“大接触轻触被判重触”清单，便于定位模型是否过度依赖半径或面积。
+- `android/analysis/run_android_touch_window_ablation.py`：新增 Android 全量原始数据时间窗口消融脚本，读取 `ALL_NATIVE_NO_FILTER_manifest.csv` 后对 `pre/post` 连续时间窗执行多 seed 的 diagonal LDA probe；默认使用 `enhanced_patch22` 特征，缺失帧以零值补齐，确保有效和无效口径之外的全部已落盘原始样本都能参与窗口比较，并输出 `window_ablation_runs.csv`、`window_ablation_summary.csv` 与 `window_ablation_report.json`。
+- `android/analysis/train_android_touch_cnn.py`：训练导出脚本支持全量原始 manifest 的 `raw_original_path` 等路径字段，并新增缺失帧处理策略；默认用零值补齐缺失帧，使 CNN 训练口径可与全量窗口消融保持一致。当前已用该脚本导出前五窗口 Android 22 通道 CNN 权重和 scaler，并写入 `aispect_impact_models` assets。
+- Android 数据分层规则：所有手机原始 JSON 必须保留；清洗脚本只生成 `high_quality/review/rejected` 标签和 manifest，不删除原始样本。JSON 损坏、窗口帧缺失、多指、拖动/取消等样本会被标记为复核或 rejected；设备能力弱、触摸半径缺失、归一化无效、重触样本过短、大幅滑移或冲击异常的样本也只做质量标注。类别不均衡时可额外生成 `balanced_train_manifest.csv` 作为训练视图，但不得替代全量原始数据。
 
 ## Impact Dashboard GitHub Pages 部署补充
 - `docs/impact_dashboard/index.html`：作为 GitHub Pages 发布副本，复用本地 `tools/impact_dashboard/dashboard.html` 的静态内容，并将下载链接改为相对路径，确保项目站点子路径下可正常访问 `latest_samples.csv`。
@@ -151,3 +246,63 @@
 - 2026-04-05：将根控制器与 SwiftUI 入口宿主层同步改为黑底，修复安全区仍然暴露白色背景的问题。
 - 2026-04-05：训练数据采集的运动标签扩展为“手持静止 / 放置静止 / 走路”，并兼容历史 `static` 标签映射到手持静止。
 - 2026-04-07：新增 `docs/impact_dashboard` GitHub Pages 发布目录与根入口跳转页，并修正发布副本里的数据下载相对路径。
+- 2026-04-12：将 iOS App 目录、Xcode 工程、Target、产品名、Bundle Identifier 与 SwiftUI 入口从 `zhifaIOS` 统一重命名为 `ZHIFAeyes`，便于后续以新品牌名继续开发与打开工程。
+- 2026-04-12：闭眼检测主链从 ARKit 切换为 Vision + AVCaptureSession，新增低功耗前置相机流水线、ARKit 兜底分支、权限拒绝文案与相机用途说明更新。
+- 2026-04-12：闭眼检测新增页面级预热、低帧率待机与触发窗口升频机制，减少重复冷启动带来的启动时延与待机功耗。
+- 2026-04-12：闭眼检测补充预热、首帧、锁脸、判定四个关键延迟埋点，并把真机调试面板升级为多阶段性能观测视图。
+- 2026-04-12：根据真机实测“总在超时前未命中”的现象，下调闭眼保持时长、提高检测窗口帧率、加入开眼回滞与更轻平滑，修正 Vision 版闭眼判定过于保守的问题。
+- 2026-04-12：继续把闭眼检测向低延迟极限推进，加入强闭眼快速通道、缩短常规保持窗口、降低基线样本门槛，并移除每帧主线程方向读取的调度开销。
+- 2026-04-12：修复 Vision 检测态升频对设备帧率区间过于苛刻的问题，改为自动协商最接近的受支持帧率，避免检测会话意外停留在低帧率待机档导致持续漏判。
+- 2026-04-12：为闭眼检测关键阈值与保持时长补充面向人工微调的中文注释，便于在 Xcode 内直接逐项试参。
+- 2026-04-12：加入闭眼排查版调试链路，默认关闭强闭眼快速通道、把判定融合改为原始值优先的加权平均，并在测试面板显示实时基线与比值快照。
+- 2026-04-12：修复预热期基线容易被异常 eye landmarks 污染的问题，新增基线异常值过滤、坏基线重置、向上跳变限制与向下快速恢复逻辑。
+- 2026-04-12：将 Vision 眼部开合度从包围盒高宽比切换为点距 `EAR`，减少眼轮廓异常点对基线与闭眼判定的破坏。
+- 2026-04-12：修复预热阶段错误复用路过人脸基线的逻辑缺陷，正式检测改为仅基于当前点击后的样本重新建立开眼基线。
+- 2026-06-04：新增 Android 移植工程，优先完成非声学采集链路，接入 Android 触摸半径/压力/面积/方向字段的标准 axis 兼容读取、设备能力分级、IMU 窗口、CNN 诊断与 JSON 样本落盘。
+- 2026-06-05：将桌面 `zhifaIOS_old.app` 中可迁移的旧触控 CNN 模型资源接入 Android 工程，示例 App 更名为旧触控安卓适配版，并让 Android 诊断优先使用旧包 13 通道增强模型。
+- 2026-06-05：Android 示例 App 补齐旧 iOS 触控采集面板格式，新增真实 CNN 模型 catalog 切换、采集开关任务锁定、模型/标签状态日志与数据目录复制，并让样本诊断优先使用当前手动选择的模型。
+- 2026-06-05：Android 示例 App 从表单式采集页改为旧 iOS 式全屏主界面与左上悬浮冲击测试面板，训练采集改由全屏非面板区域承接；同时把触摸采样间隔调到约 250Hz、拖动判定半径放宽到 28dp、重触抬起偏移阈值降到 4dp，提升小米真机采集灵敏度并减少轻微手抖误丢样本。
+- 2026-06-10：补充 Android 触摸训练级消融脚本，基于当前小米均衡训练集对旧 13 通道、半径、协方差、多通道、高斯热图摘要、高斯 9x9 热图与增强 22 通道输入进行多 seed probe 对比，并生成 ablation 报告。
+- 2026-06-11：Android 采集落盘改为全量原始事件保存，未来拖动/取消等样本也会写入同一数据目录，避免界面计数和可导出 JSON 数量不一致。
+- 2026-06-11：新增 Android 全量原始数据时间窗口消融脚本，基于 9185 条手机原始 JSON 比较 `pre/post` 时间窗，并输出前五窗口排序报告。
+- 2026-06-12：基于全量原始数据训练并接入前五时间窗口 22 通道 CNN 模型，Android 手机端支持采集开关打开时在两次触摸之间热切换模型，并默认选中 `-5...+9` 第一名窗口。
+- 2026-06-05：继续细化 Android 对 iOS `AispectImpactTestView` 的复刻，面板展开/收起尺寸、采集 switch、冲击阈值 slider、实时事件行与冲击窗口日志对齐 iOS 交互；全屏采集改为按触摸起点锁定整轮事件，IMU 目标采样周期调整到 4167us。
+- 2026-06-05：修复小米 Android 15 点击训练采集开关即闪退的问题，新增高频传感器权限与 IMU 采样率降级兜底；Android 采集链路新增三种触摸归一化方案选择，并把三套结果、设备内分位、短期历史偏移与字段质量标记同时写入训练样本 JSON。
+- 2026-06-05：修复 Android 悬浮测试面板收起/展开不灵敏的问题，收起态改为 132x64dp 可点击小面板，展开态顶部 58dp 整条头部均可触发收起，并在事件分发入口增加外扩 36dp 的优先热区。
+- 2026-06-06：Android 示例 App 新增重触视觉与振动反馈，依据实时触摸半径/面积估算强度并映射到触摸环大小、暖色冲击闪烁和短振动。
+- 2026-06-06：新增 Android 真机数据清洗与 CNN 训练导出脚本，将 471 条小米样本分为优质、复核、剔除三层，并生成类别均衡训练清单，明确旧 CNN 输出只作诊断而不作为训练真值。
+- 2026-06-08：新增接触区域三方案离线比对脚本，按二维高斯热图、多通道表示、协方差矩阵三类 CNN 输入重建已采集样本，确认当前 JSON 数据保留了后续比对所需的触摸半径、中心、方向、有效性与接触 patch 信息。
+- 2026-06-08：Android 面板将旧 CNN 输出改为诊断文案并显示当前训练标签，轻点采集任务开启时关闭重触振动与红色冲击反馈，避免轻点采集被旧模型或即时反馈误读为重点识别。
+- 2026-06-08：Android 训练采集进一步改为按面板锁定标签重写触摸结束事件和 `sourceTouchKind`，关闭旧 CNN 实时诊断，清理训练背景无关 UI，并把收起/测试切换限制到明确按钮区域以降低误触。
+- 2026-06-08：修复 Android 悬浮面板滚动后收起按钮位置漂移的问题，切换面板时不再单独改变按钮层级，保证按钮稳定停在面板顶部。
+- 2026-06-08：Android CNN 训练入口从旧 `old13` 默认升级为 `enhanced_patch22`，推理器与采集控制器补齐 `contactPatch` / `touchNormalization` 输入传递，并新增增强触摸特征报告脚本。
+- 2026-06-13：正式接入 Contact Patch 三方案 CNN 特征预设，补齐 Android 推理端 `gaussian.*`、`multi.*`、`covariance.*` 同名特征读取，新增正式 CNN 批量消融脚本，并在 9185 条全量 Android 原始样本上完成 12 项 CNN 消融汇总。
+- 2026-06-14：为 Android 触摸归一化、手机端 CNN 特征读取和离线 CNN 训练脚本补充简洁中文注释，重点标明 Contact Patch 三方案、缺失值占位、`validMask` 与 `confidence` 的真实语义。
+- 2026-06-16：Android 采集标签新增拇指/食指维度，面板增加手指类型选择并写入新样本 JSON 与文件名；清洗 manifest 增加 `finger_type`，同时扩大面板收起/展开热区。
+- 2026-06-23：Android 验证模式支持在采集开关关闭时直接跑当前 CNN 四分类识别并显示人工标签对比、置信度、四类概率和四类召回统计；该模式不保存训练 JSON。
+- 2026-06-13：新增 `patch9` 九通道组合穷举消融脚本，基于 9185 条全量 Android 原始样本、`-5...+9` 窗口和 3 个 seed 跑完 511 个非空子集，用于筛选少通道但信息覆盖完整的接触特征组合候选。
+- 2026-06-22：新增历史 Android 样本拇指标记脚本，已将本地 9185 条唯一原始样本及其展开整理副本补齐为 `thumb`，并让清洗脚本对缺失手指字段的旧样本默认按拇指处理。
+- 2026-06-22：从已连接小米手机导出 12131 条 raw 样本，识别其中新增 2946 条为食指样本；基于 `handheld_static` 场景构建四类各 733 条的拇指/食指轻重点均衡数据集，并训练 `enhanced_patch22` 四分类 CNN，验证集平衡准确率约 92.49%。
+- 2026-06-22：完成拇指/食指轻重点四分类 CNN 全量消融 12 项；最佳 preset 为 `old13_raw_radius`，验证集平衡准确率约 92.90%、最小类别召回约 88.52%，`old13_multichannel` 与 `enhanced_patch22` 以约 92.49% 平衡准确率并列其后。
+- 2026-06-23：将拇指/食指轻重点四分类消融前五模型打入 Android assets，并扩展手机端 CNN 推理器、预测结果结构、采集日志与面板展示，使模型切换功能可以直接切换四分类模型。
+- 2026-06-23：将 `lemon + tao` 全量四分类 CNN 消融前五名导入 Android assets 并置顶 catalog，手机端默认使用新的 `lemon_tao_full4_enhanced_patch21_no_confidence` 模型。
+- 2026-07-01：整理 GitHub 上传结构，新增根 README，将两人标签数据以压缩包归档到 `data/`，将全量四分类前五模型与消融报告归档到 `models/`，启用 Git LFS 跟踪数据压缩包、manifest CSV 与 CNN 模型资源，并忽略本机 Android 配置与完整消融中间结果目录。
+- 2026-06-23：Android 采集面板新增四分类实时召回显示框，按本轮 accepted 样本实时累计四类召回、macro recall 与总体 accuracy；显示数据不再受训练数据采集开关清零影响，仅在切换 CNN 模型时重置。
+- 2026-06-23：Android 手机采集阶段去除有效/无效样本判断，拖动、取消和普通点击都会按当前人工标签保存为 accepted 样本；界面计数同步改为保存数与写入失败数。
+- 2026-06-23：修复去除有效/无效判断后同一次触摸可能由多个结束类事件重复落盘的问题，采集控制器新增单次触摸保存闸门，保证一次按压最多保存一条样本。
+- 2026-06-23：Android 面板新增验证模式开关，每次触摸后显示人工标签、CNN 输出、对错、置信度与当前组合统计，支持采集时直接观察四分类准确性。
+- 2026-06-23：Android 四分类消融训练脚本接入自动 CUDA/MPS/CPU 设备选择，Mac 本机可直接启用 MPS 加速，已完成 preset 可继续恢复跑剩余消融。
+- 2026-06-23：修复四分类训练脚本调用 `train_one_epoch` 时未传样本权重的问题，保持四分类默认等权训练并恢复全量消融可运行性。
+- 2026-06-23：新增 Android 接触面积偏置审计脚本，并基于 `f31039_20260623_phone_pull` 生成清洗、最近五分钟审计、二分类/四分类 CNN 消融、`patch9` 子集穷举和接触特征分布报告，用于排查大接触轻触被识别为重触的问题。
+- 2026-06-23：修复 Android 四分类召回验证一次触摸可能累计多次的问题，控制器新增完成预测序号并在新触摸开始时清空旧预测，面板召回统计改为按预测序号去重；训练采集仍保持面板外触摸全量 accepted 保存。
+- 2026-06-23：Android 示例 App 调整实时验证口径，验证模式打开后采集和非采集触摸都会持续累计四分类召回，采集开关、模型切换和任务切换不再清空累计显示。
+- 2026-06-23：Android 面板隐藏常驻冲击窗口日志、复制日志按钮和接触编码明细数据，优先保留四分类验证结果、模型切换与训练采集控件显示空间。
+- 2026-06-23：Android 采集界面移除振动、红色冲击闪屏和重触色彩暗示，训练 JSON 不再写入 `cnnPrediction`，并新增最近保存原生样本摘要显示。
+- 2026-06-23：Android 面板将 CNN 诊断结果改为固定高度方框，并修正人工标签占位符与传参顺序，避免每次预测结果文本长短变化或格式化异常推动四分类数据框上下跳动。
+- 2026-06-23：Android 采集教程 `1...5` 文案区域改为固定五行高度，避免采集开关切换锁定提示时继续推动下面的数据框。
+- 2026-06-23：Android 二分类 heavy 线去掉 `confidence` 训练通道，接入大面积轻触 hard negative 加权，全量 high_quality 复训后回装 `android_patch21_no_confidence_pre5_post9`；端侧加入“冲击 delta + 形态或时间动态”证据约束。
+- 2026-06-25：导出当前 OnePlus PHK110 手机 `3374` 条原生训练样本，生成 `oneplus_20260625_phone_pull` 清洗数据集；基于 `handheld_static` 四类构建 clean 与 hard 两套平衡 manifest，并完成 5 个核心 preset 的四分类 CNN 消融。
+- 2026-06-25：将 OnePlus hard-core 消融第一名 `oneplus_four_class_hard_core_old13_raw_radius` 导入 Android assets 并置顶 catalog；该模型在 hard 平衡集上验证平衡准确率约 `97.35%`、最弱类召回约 `93.94%`，端侧四分类默认模型同步切换到该模型。
+- 2026-06-25：针对手机实测食指/拇指同强度混淆，新增 OnePlus 四分类时间留出复核；确认随机切分因连续采集段泄漏而高估 `old13_raw_radius`，端侧默认四分类模型改为时间留出更稳的 `oneplus_four_class_hard_core_old13`，并保留 raw radius 版本作为第二项对照。
+- 2026-06-25：补采后从 OnePlus PHK110 导出 `4641` 条原生 JSON，修正四分类数据构建脚本优先使用真实 `finger_type`，训练和消融脚本新增 temporal split；基于 hard_v2 每类 `321` 条样本完成 `25%` 与 `10%` 最新尾段时间留出全量消融，并将 `10%` 留出当前第一名 preset 的 nearfull 装机版 `oneplus_four_class_after_recollect_hard_nearfull_old13_raw_radius` 置顶 catalog 且设为端侧默认四分类模型，`temporal10` 训练版保留为第二项对照。
+- 2026-06-26：修复四分类训练未生效使用 `sample_weight` 的缺陷，重新跑 weighted temporal10 核心消融；`old13_multichannel` 以约 `87.50%` 平衡准确率、`81.25%` 最小召回和更少同强度手指互混胜出，新增 weighted nearfull 装机模型 `oneplus_four_class_after_recollect_hard_nearfull_weighted_old13_multichannel` 并切为端侧默认。

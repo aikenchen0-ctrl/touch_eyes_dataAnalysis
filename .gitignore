@@ -6,3 +6,32 @@
 
 Knock/
 TouchVisualizer/
+
+__pycache__/
+*.pyc
+android/analysis/.venv/
+
+# Android / Gradle 构建产物
+android/.gradle/
+android/**/build/
+android/app/release_upload/
+android/local.properties
+*.apk
+*.aab
+
+# Xcode 本机构建产物
+DerivedData/
+build/
+
+# 本地展开原始数据已归档到 data/ 后再上传
+/lemon/
+/tao/
+/lemon_raw_before_thumb_mark/
+
+# Android 历史分析拉取目录默认只保留本地，除非明确整理成上传数据集
+android/analysis/datasets/*
+!android/analysis/datasets/lemon_tao_full_four_class_20260623/
+!android/analysis/datasets/lemon_tao_full_four_class_20260623/**
+
+# 完整消融中间结果目录本地生成，整理后的报告放在 models/reports/
+android/analysis/results/*

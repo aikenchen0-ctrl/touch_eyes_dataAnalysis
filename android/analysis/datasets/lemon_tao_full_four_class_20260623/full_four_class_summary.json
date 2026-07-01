@@ -1,0 +1,41 @@
+{
+  "classOrder": [
+    "thumb_light",
+    "thumb_heavy",
+    "index_light",
+    "index_heavy"
+  ],
+  "countsByClass": {
+    "index_heavy": 6237,
+    "index_light": 7645,
+    "thumb_heavy": 7438,
+    "thumb_light": 8894
+  },
+  "countsByMotion": {
+    "handheld_static": 12999,
+    "placed_static": 8608,
+    "walking": 8607
+  },
+  "countsBySource": {
+    "lemon": 17872,
+    "tao": 12342
+  },
+  "countsBySourceAndClass": {
+    "lemon:index_heavy": 3069,
+    "lemon:index_light": 4542,
+    "lemon:thumb_heavy": 4389,
+    "lemon:thumb_light": 5872,
+    "tao:index_heavy": 3168,
+    "tao:index_light": 3103,
+    "tao:thumb_heavy": 3049,
+    "tao:thumb_light": 3022
+  },
+  "manifest": "android/analysis/datasets/lemon_tao_full_four_class_20260623/full_four_class_manifest.csv",
+  "policy": "all JSON rows with explicit fingerType and touchStrength; no quality filtering; no downsampling; source JSON content not modified by this manifest step",
+  "skippedRows": 0,
+  "sourceDirectories": {
+    "lemon": "/Users/xueyin/zhifaios_eyes/touch_eyes_dataAnalysis/lemon",
+    "tao": "/Users/xueyin/zhifaios_eyes/touch_eyes_dataAnalysis/tao"
+  },
+  "totalRows": 30214
+}

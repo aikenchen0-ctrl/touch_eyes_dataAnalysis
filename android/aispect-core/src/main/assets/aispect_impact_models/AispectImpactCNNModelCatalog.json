@@ -1,0 +1,182 @@
+[
+  {
+    "displayName": "OnePlus 4-class recollect nearfull weighted old13 multichannel",
+    "id": "oneplus_four_class_after_recollect_hard_nearfull_weighted_old13_multichannel",
+    "scalerResourceName": "AispectImpactCNNScaler_oneplus_four_class_after_recollect_hard_nearfull_weighted_old13_multichannel",
+    "weightsResourceName": "AispectImpactCNNWeights_oneplus_four_class_after_recollect_hard_nearfull_weighted_old13_multichannel"
+  },
+  {
+    "displayName": "OnePlus 4-class recollect temporal10 weighted #1 old13 multichannel",
+    "id": "oneplus_four_class_after_recollect_hard_temporal10_weighted_old13_multichannel",
+    "scalerResourceName": "AispectImpactCNNScaler_oneplus_four_class_after_recollect_hard_temporal10_weighted_old13_multichannel",
+    "weightsResourceName": "AispectImpactCNNWeights_oneplus_four_class_after_recollect_hard_temporal10_weighted_old13_multichannel"
+  },
+  {
+    "displayName": "OnePlus 4-class recollect nearfull old13 raw radius",
+    "id": "oneplus_four_class_after_recollect_hard_nearfull_old13_raw_radius",
+    "scalerResourceName": "AispectImpactCNNScaler_oneplus_four_class_after_recollect_hard_nearfull_old13_raw_radius",
+    "weightsResourceName": "AispectImpactCNNWeights_oneplus_four_class_after_recollect_hard_nearfull_old13_raw_radius"
+  },
+  {
+    "displayName": "OnePlus 4-class recollect temporal10 #1 old13 raw radius",
+    "id": "oneplus_four_class_after_recollect_hard_temporal10_old13_raw_radius",
+    "scalerResourceName": "AispectImpactCNNScaler_oneplus_four_class_after_recollect_hard_temporal10_old13_raw_radius",
+    "weightsResourceName": "AispectImpactCNNWeights_oneplus_four_class_after_recollect_hard_temporal10_old13_raw_radius"
+  },
+  {
+    "displayName": "OnePlus 4-class temporal #1 old13",
+    "id": "oneplus_four_class_hard_core_old13",
+    "scalerResourceName": "AispectImpactCNNScaler_oneplus_four_class_hard_core_old13",
+    "weightsResourceName": "AispectImpactCNNWeights_oneplus_four_class_hard_core_old13"
+  },
+  {
+    "displayName": "OnePlus 4-class hard #2 old13 raw radius",
+    "id": "oneplus_four_class_hard_core_old13_raw_radius",
+    "scalerResourceName": "AispectImpactCNNScaler_oneplus_four_class_hard_core_old13_raw_radius",
+    "weightsResourceName": "AispectImpactCNNWeights_oneplus_four_class_hard_core_old13_raw_radius"
+  },
+  {
+    "displayName": "Lemon+Tao 4-class #1 enhanced_patch21_no_confidence",
+    "id": "lemon_tao_full4_enhanced_patch21_no_confidence",
+    "scalerResourceName": "AispectImpactCNNScaler_lemon_tao_full4_enhanced_patch21_no_confidence",
+    "weightsResourceName": "AispectImpactCNNWeights_lemon_tao_full4_enhanced_patch21_no_confidence"
+  },
+  {
+    "displayName": "Lemon+Tao 4-class #2 enhanced_patch22",
+    "id": "lemon_tao_full4_enhanced_patch22",
+    "scalerResourceName": "AispectImpactCNNScaler_lemon_tao_full4_enhanced_patch22",
+    "weightsResourceName": "AispectImpactCNNWeights_lemon_tao_full4_enhanced_patch22"
+  },
+  {
+    "displayName": "Lemon+Tao 4-class #3 old13_multichannel",
+    "id": "lemon_tao_full4_old13_multichannel",
+    "scalerResourceName": "AispectImpactCNNScaler_lemon_tao_full4_old13_multichannel",
+    "weightsResourceName": "AispectImpactCNNWeights_lemon_tao_full4_old13_multichannel"
+  },
+  {
+    "displayName": "Lemon+Tao 4-class #4 old13_gaussian_summary",
+    "id": "lemon_tao_full4_old13_gaussian_summary",
+    "scalerResourceName": "AispectImpactCNNScaler_lemon_tao_full4_old13_gaussian_summary",
+    "weightsResourceName": "AispectImpactCNNWeights_lemon_tao_full4_old13_gaussian_summary"
+  },
+  {
+    "displayName": "Lemon+Tao 4-class #5 old13_raw_radius",
+    "id": "lemon_tao_full4_old13_raw_radius",
+    "scalerResourceName": "AispectImpactCNNScaler_lemon_tao_full4_old13_raw_radius",
+    "weightsResourceName": "AispectImpactCNNWeights_lemon_tao_full4_old13_raw_radius"
+  },
+  {
+    "displayName": "Finger 4-class #1 old13 raw radius",
+    "id": "android_finger_four_class_ablation_old13_raw_radius",
+    "scalerResourceName": "AispectImpactCNNScaler_android_finger_four_class_ablation_old13_raw_radius",
+    "weightsResourceName": "AispectImpactCNNWeights_android_finger_four_class_ablation_old13_raw_radius"
+  },
+  {
+    "displayName": "Finger 4-class #2 old13 multichannel",
+    "id": "android_finger_four_class_ablation_old13_multichannel",
+    "scalerResourceName": "AispectImpactCNNScaler_android_finger_four_class_ablation_old13_multichannel",
+    "weightsResourceName": "AispectImpactCNNWeights_android_finger_four_class_ablation_old13_multichannel"
+  },
+  {
+    "displayName": "Finger 4-class #3 enhanced patch22",
+    "id": "android_finger_four_class_ablation_enhanced_patch22",
+    "scalerResourceName": "AispectImpactCNNScaler_android_finger_four_class_ablation_enhanced_patch22",
+    "weightsResourceName": "AispectImpactCNNWeights_android_finger_four_class_ablation_enhanced_patch22"
+  },
+  {
+    "displayName": "Finger 4-class #4 old13 gaussian summary",
+    "id": "android_finger_four_class_ablation_old13_gaussian_summary",
+    "scalerResourceName": "AispectImpactCNNScaler_android_finger_four_class_ablation_old13_gaussian_summary",
+    "weightsResourceName": "AispectImpactCNNWeights_android_finger_four_class_ablation_old13_gaussian_summary"
+  },
+  {
+    "displayName": "Finger 4-class #5 patch21 no confidence",
+    "id": "android_finger_four_class_ablation_enhanced_patch21_no_confidence",
+    "scalerResourceName": "AispectImpactCNNScaler_android_finger_four_class_ablation_enhanced_patch21_no_confidence",
+    "weightsResourceName": "AispectImpactCNNWeights_android_finger_four_class_ablation_enhanced_patch21_no_confidence"
+  },
+  {
+    "displayName": "Android patch21 no confidence hard negative -5...+9",
+    "id": "android_patch21_no_confidence_pre5_post9",
+    "scalerResourceName": "AispectImpactCNNScaler_android_patch21_no_confidence_pre5_post9",
+    "weightsResourceName": "AispectImpactCNNWeights_android_patch21_no_confidence_pre5_post9"
+  },
+  {
+    "displayName": "Android patch22 #1 -5...+9",
+    "id": "android_patch22_pre5_post9",
+    "scalerResourceName": "AispectImpactCNNScaler_android_patch22_pre5_post9",
+    "weightsResourceName": "AispectImpactCNNWeights_android_patch22_pre5_post9"
+  },
+  {
+    "displayName": "Android patch22 #2 -5...+6",
+    "id": "android_patch22_pre5_post6",
+    "scalerResourceName": "AispectImpactCNNScaler_android_patch22_pre5_post6",
+    "weightsResourceName": "AispectImpactCNNWeights_android_patch22_pre5_post6"
+  },
+  {
+    "displayName": "Android patch22 #3 -5...+10",
+    "id": "android_patch22_pre5_post10",
+    "scalerResourceName": "AispectImpactCNNScaler_android_patch22_pre5_post10",
+    "weightsResourceName": "AispectImpactCNNWeights_android_patch22_pre5_post10"
+  },
+  {
+    "displayName": "Android patch22 #4 -5...+0",
+    "id": "android_patch22_pre5_post0",
+    "scalerResourceName": "AispectImpactCNNScaler_android_patch22_pre5_post0",
+    "weightsResourceName": "AispectImpactCNNWeights_android_patch22_pre5_post0"
+  },
+  {
+    "displayName": "Android patch22 #5 -5...+7",
+    "id": "android_patch22_pre5_post7",
+    "scalerResourceName": "AispectImpactCNNScaler_android_patch22_pre5_post7",
+    "weightsResourceName": "AispectImpactCNNWeights_android_patch22_pre5_post7"
+  },
+  {
+    "displayName": "g11 -4...+8",
+    "id": "g11_f13_pre4_post8",
+    "scalerResourceName": "AispectImpactCNNScaler_g11_f13_pre4_post8",
+    "weightsResourceName": "AispectImpactCNNWeights_g11_f13_pre4_post8"
+  },
+  {
+    "displayName": "g13_time -4...+8",
+    "id": "g13_time_f13_pre4_post8",
+    "scalerResourceName": "AispectImpactCNNScaler_g13_time_f13_pre4_post8",
+    "weightsResourceName": "AispectImpactCNNWeights_g13_time_f13_pre4_post8"
+  },
+  {
+    "displayName": "g11 -3...+8",
+    "id": "g11_f12_pre3_post8",
+    "scalerResourceName": "AispectImpactCNNScaler_g11_f12_pre3_post8",
+    "weightsResourceName": "AispectImpactCNNWeights_g11_f12_pre3_post8"
+  },
+  {
+    "displayName": "g13_time -3...+8",
+    "id": "g13_time_f12_pre3_post8",
+    "scalerResourceName": "AispectImpactCNNScaler_g13_time_f12_pre3_post8",
+    "weightsResourceName": "AispectImpactCNNWeights_g13_time_f12_pre3_post8"
+  },
+  {
+    "displayName": "g11 -4...+9",
+    "id": "g11_f14_pre4_post9",
+    "scalerResourceName": "AispectImpactCNNScaler_g11_f14_pre4_post9",
+    "weightsResourceName": "AispectImpactCNNWeights_g11_f14_pre4_post9"
+  },
+  {
+    "displayName": "g13_time -4...+9",
+    "id": "g13_time_f14_pre4_post9",
+    "scalerResourceName": "AispectImpactCNNScaler_g13_time_f14_pre4_post9",
+    "weightsResourceName": "AispectImpactCNNWeights_g13_time_f14_pre4_post9"
+  },
+  {
+    "displayName": "g11 -3...+9",
+    "id": "g11_f13_pre3_post9",
+    "scalerResourceName": "AispectImpactCNNScaler_g11_f13_pre3_post9",
+    "weightsResourceName": "AispectImpactCNNWeights_g11_f13_pre3_post9"
+  },
+  {
+    "displayName": "g13_time -3...+9",
+    "id": "g13_time_f13_pre3_post9",
+    "scalerResourceName": "AispectImpactCNNScaler_g13_time_f13_pre3_post9",
+    "weightsResourceName": "AispectImpactCNNWeights_g13_time_f13_pre3_post9"
+  }
+]
