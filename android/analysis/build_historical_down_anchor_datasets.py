@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
 
+import argparse
+import csv
+import json
 import math
+import os
+import shutil
+import uuid
+from collections import Counter
 from copy import deepcopy
+from pathlib import Path
 
 
 SIGNAL_FIELDS = (
@@ -18,6 +26,31 @@ SIGNAL_FIELDS = (
     "x_norm",
     "y_norm",
 )
+
+A_MANIFEST_FIELDS = (
+    "id",
+    "sha256",
+    "source_path",
+    "schema_version",
+    "collector",
+    "device",
+    "date",
+    "session_id",
+    "class_label",
+    "down_timestamp",
+    "down_timestamp_source",
+    "anchor_timestamp",
+    "sample_rate_hz",
+    "virtual_down_frame_index",
+    "nearest_source_frame_index",
+    "nearest_time_error_seconds",
+    "pre_down_observed_count",
+    "post_down_observed_count",
+    "observed_frame_count",
+    "placeholder_frame_count",
+)
+
+B_MANIFEST_FIELDS = A_MANIFEST_FIELDS + ("derived_path",)
 
 
 def finite_float(value, fallback=None):
@@ -146,3 +179,208 @@ def analyze_sample(data):
     result["exclusion_reason_b"] = ""
     result["down_frames"] = down_frames
     return result
+
+
+def resolve_source_path(row, manifest_path):
+    value = row.get("destination") or row.get("path") or ""
+    if not value:
+        return None
+    candidate = Path(value)
+    if candidate.is_absolute() and candidate.exists():
+        return candidate
+    resolved = manifest_path.parent / candidate
+    return resolved if resolved.exists() else None
+
+
+def class_label(data):
+    label = data.get("label") or {}
+    finger = str(label.get("fingerType") or "thumb")
+    strength = str(label.get("touchStrength") or "")
+    return finger + "_" + strength
+
+
+def collector_name(row, data):
+    value = data.get("collector")
+    if isinstance(value, dict):
+        value = value.get("userName")
+    return str(value or row.get("collector") or "unknown")
+
+
+def manifest_record(row, data, source_path, analysis):
+    return {
+        "id": str(data.get("id") or row.get("id") or ""),
+        "sha256": str(row.get("sha256") or ""),
+        "source_path": str(source_path.resolve()),
+        "schema_version": int(finite_float(data.get("schemaVersion"), 0) or 0),
+        "collector": collector_name(row, data),
+        "device": str(row.get("device") or (data.get("deviceCapability") or {}).get("deviceName") or "unknown"),
+        "date": str(row.get("date") or "unknown"),
+        "session_id": str(data.get("collectionSessionID") or ""),
+        "class_label": class_label(data),
+        "down_timestamp": analysis["down_timestamp"],
+        "down_timestamp_source": analysis["down_timestamp_source"],
+        "anchor_timestamp": analysis["anchor_timestamp"],
+        "sample_rate_hz": analysis["sample_rate_hz"],
+        "virtual_down_frame_index": analysis["virtual_down_frame_index"],
+        "nearest_source_frame_index": analysis["nearest_source_frame_index"],
+        "nearest_time_error_seconds": analysis["nearest_time_error_seconds"],
+        "pre_down_observed_count": analysis["pre_down_observed_count"],
+        "post_down_observed_count": analysis["post_down_observed_count"],
+        "observed_frame_count": analysis["observed_frame_count"],
+        "placeholder_frame_count": analysis["placeholder_frame_count"],
+    }
+
+
+def derived_payload(record, data, analysis):
+    return {
+        "schemaVersion": 1,
+        "sourceId": record["id"],
+        "sourcePath": record["source_path"],
+        "sourceSchemaVersion": record["schema_version"],
+        "label": data.get("label") or {},
+        "downAnchorTimestamp": analysis["down_timestamp"],
+        "downReferenceFrameIndex": 0,
+        "sampleRateHz": analysis["sample_rate_hz"],
+        "downFrames": analysis["down_frames"],
+    }
+
+
+def safe_file_name(value):
+    safe = "".join(character if character.isalnum() or character in ("-", "_") else "_" for character in value)
+    return safe or uuid.uuid4().hex
+
+
+def write_manifest(path, fields, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as output:
+        writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def write_json(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def counter_dict(counter):
+    return dict(sorted(counter.items(), key=lambda item: str(item[0])))
+
+
+def dataset_summary(rows, exclusion_counts):
+    return {
+        "retained": len(rows),
+        "excludedReasons": counter_dict(exclusion_counts),
+        "schemaCounts": counter_dict(Counter(str(row["schema_version"]) for row in rows)),
+        "collectorCounts": counter_dict(Counter(row["collector"] for row in rows)),
+        "deviceCounts": counter_dict(Counter(row["device"] for row in rows)),
+        "classCounts": counter_dict(Counter(row["class_label"] for row in rows)),
+    }
+
+
+def publish_directory(temp_root, output_root):
+    if output_root.exists():
+        shutil.rmtree(output_root)
+    os.replace(temp_root, output_root)
+
+
+def build_datasets(source_manifest, output_root):
+    source_manifest = Path(source_manifest).resolve()
+    output_root = Path(output_root).resolve()
+    temp_root = output_root.parent / (output_root.name + ".tmp-" + uuid.uuid4().hex)
+    a_root = temp_root / "a_down_inside_saved_window"
+    b_root = temp_root / "b_complete_down_minus5_plus9"
+    a_rows = []
+    b_rows = []
+    a_ids = set()
+    b_ids = set()
+    a_exclusions = Counter()
+    b_exclusions = Counter()
+    discovered = 0
+    load_failures = 0
+    try:
+        with source_manifest.open("r", encoding="utf-8-sig", newline="") as source:
+            for source_row in csv.DictReader(source):
+                discovered += 1
+                source_path = resolve_source_path(source_row, source_manifest)
+                if source_path is None:
+                    load_failures += 1
+                    a_exclusions["source_path_missing"] += 1
+                    b_exclusions["source_path_missing"] += 1
+                    continue
+                try:
+                    with source_path.open("r", encoding="utf-8") as input_file:
+                        data = json.load(input_file)
+                except (OSError, json.JSONDecodeError):
+                    load_failures += 1
+                    a_exclusions["json_load_failed"] += 1
+                    b_exclusions["json_load_failed"] += 1
+                    continue
+                analysis = analyze_sample(data)
+                if not analysis["eligible_a"]:
+                    a_exclusions[analysis["exclusion_reason_a"] or "unknown"] += 1
+                    b_exclusions["not_eligible_a"] += 1
+                    continue
+                record = manifest_record(source_row, data, source_path, analysis)
+                sample_id = record["id"]
+                if not sample_id or sample_id in a_ids:
+                    a_exclusions["duplicate_or_missing_id"] += 1
+                    b_exclusions["duplicate_or_missing_id"] += 1
+                    continue
+                a_ids.add(sample_id)
+                a_rows.append(record)
+                if not analysis["eligible_b"]:
+                    b_exclusions[analysis["exclusion_reason_b"] or "unknown"] += 1
+                    continue
+                if sample_id in b_ids:
+                    b_exclusions["duplicate_id"] += 1
+                    continue
+                b_ids.add(sample_id)
+                file_name = safe_file_name(sample_id) + ".json"
+                derived_relative = Path("samples") / file_name
+                write_json(b_root / derived_relative, derived_payload(record, data, analysis))
+                b_record = dict(record)
+                b_record["derived_path"] = str(derived_relative)
+                b_rows.append(b_record)
+                if discovered % 5000 == 0:
+                    print(json.dumps({"processed": discovered, "datasetA": len(a_rows), "datasetB": len(b_rows)}), flush=True)
+        if not b_ids.issubset(a_ids):
+            raise RuntimeError("dataset_b_not_subset_of_a")
+        write_manifest(a_root / "manifest.csv", A_MANIFEST_FIELDS, a_rows)
+        write_manifest(b_root / "manifest.csv", B_MANIFEST_FIELDS, b_rows)
+        a_summary = dataset_summary(a_rows, a_exclusions)
+        b_summary = dataset_summary(b_rows, b_exclusions)
+        root_summary = {
+            "sourceManifest": str(source_manifest),
+            "discovered": discovered,
+            "loadFailures": load_failures,
+            "datasetA": a_summary,
+            "datasetB": b_summary,
+            "datasetBSubsetOfA": b_ids.issubset(a_ids),
+        }
+        write_json(a_root / "summary.json", a_summary)
+        write_json(b_root / "summary.json", b_summary)
+        write_json(temp_root / "summary.json", root_summary)
+        publish_directory(temp_root, output_root)
+        return root_summary
+    except BaseException:
+        if temp_root.exists():
+            shutil.rmtree(temp_root)
+        raise
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source-manifest", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    summary = build_datasets(args.source_manifest, args.output_dir)
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,6 +1,11 @@
+import csv
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from android.analysis.build_historical_down_anchor_datasets import analyze_sample
+from android.analysis.build_historical_down_anchor_datasets import build_datasets
 from android.analysis.build_historical_down_anchor_datasets import is_observed_frame
 
 
@@ -115,6 +120,76 @@ class DownAnchorAnalysisTests(unittest.TestCase):
 
         self.assertTrue(result["eligible_a"])
         self.assertEqual("touchEvents[0].timestamp", result["down_timestamp_source"])
+
+
+class DownAnchorDatasetTests(unittest.TestCase):
+    def write_source(self, root, samples):
+        source_root = root / "source"
+        source_root.mkdir()
+        manifest_path = source_root / "manifest.csv"
+        with manifest_path.open("w", encoding="utf-8", newline="") as output:
+            writer = csv.DictWriter(
+                output,
+                fieldnames=("id", "collector", "device", "date", "destination"),
+            )
+            writer.writeheader()
+            for sample_id, data in samples.items():
+                relative = Path("samples") / f"{sample_id}.json"
+                destination = source_root / relative
+                destination.parent.mkdir(exist_ok=True)
+                data["id"] = sample_id
+                data["schemaVersion"] = 3
+                data["label"] = {
+                    "fingerType": "thumb",
+                    "touchStrength": "light",
+                    "motionState": "handheld_static",
+                }
+                destination.write_text(json.dumps(data), encoding="utf-8")
+                writer.writerow({
+                    "id": sample_id,
+                    "collector": "tester",
+                    "device": "device-a",
+                    "date": "2026-07-31",
+                    "destination": str(relative),
+                })
+        return manifest_path
+
+    def test_builds_separate_a_and_b_datasets(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manifest = self.write_source(root, {
+                "excluded": sample_with_times([0.050, 0.055, 0.060]),
+                "a_only": sample_with_times([-0.005, 0.000, 0.005]),
+                "complete": sample_with_times([index * 0.005 for index in range(-5, 10)]),
+            })
+            output_root = root / "output"
+
+            summary = build_datasets(manifest, output_root)
+
+            self.assertEqual(3, summary["discovered"])
+            self.assertEqual(2, summary["datasetA"]["retained"])
+            self.assertEqual(1, summary["datasetB"]["retained"])
+            self.assertTrue((output_root / "a_down_inside_saved_window" / "manifest.csv").exists())
+            derived = output_root / "b_complete_down_minus5_plus9" / "samples" / "complete.json"
+            self.assertTrue(derived.exists())
+            payload = json.loads(derived.read_text(encoding="utf-8"))
+            self.assertEqual(list(range(-5, 10)), [frame["frameIndex"] for frame in payload["downFrames"]])
+            self.assertEqual("complete", payload["sourceId"])
+
+    def test_empty_b_still_writes_manifest_and_summary(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manifest = self.write_source(root, {
+                "a_only": sample_with_times([-0.005, 0.000, 0.005]),
+            })
+            output_root = root / "output"
+
+            summary = build_datasets(manifest, output_root)
+
+            b_root = output_root / "b_complete_down_minus5_plus9"
+            self.assertEqual(0, summary["datasetB"]["retained"])
+            self.assertEqual(1, len((b_root / "manifest.csv").read_text(encoding="utf-8").splitlines()))
+            self.assertEqual(0, json.loads((b_root / "summary.json").read_text(encoding="utf-8"))["retained"])
 
 
 if __name__ == "__main__":
