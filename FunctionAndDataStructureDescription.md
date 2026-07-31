@@ -141,6 +141,15 @@
 - `android/analysis/train_android_touch_cnn.py`：训练导出脚本支持全量原始 manifest 的 `raw_original_path` 等路径字段，并新增缺失帧处理策略；默认用零值补齐缺失帧，使 CNN 训练口径可与全量窗口消融保持一致。当前已用该脚本导出前五窗口 Android 22 通道 CNN 权重和 scaler，并写入 `aispect_impact_models` assets。
 - Android 数据分层规则：所有手机原始 JSON 必须保留；清洗脚本只生成 `high_quality/review/rejected` 标签和 manifest，不删除原始样本。JSON 损坏、窗口帧缺失、多指、拖动/取消等样本会被标记为复核或 rejected；设备能力弱、触摸半径缺失、归一化无效、重触样本过短、大幅滑移或冲击异常的样本也只做质量标注。类别不均衡时可额外生成 `balanced_train_manifest.csv` 作为训练视图，但不得替代全量原始数据。
 
+## 历史按下锚点数据集补充
+- `android/analysis/build_historical_down_anchor_datasets.py`：只读扫描 `data/deduplicated_raw/manifest.csv` 指向的去重原始 JSON，分别生成 A、B 两套按下锚点数据集，不修改任何原始 JSON。按下时间优先读取 `touchFrames[0].eventTimeMillis`，缺失时回退到 `touchEvents[0].timestamp`。
+- 真实 IMU 帧判定：`delta/x/y/z`、三轴陀螺仪、三轴重力与 `x_norm/y_norm` 中至少一个信号字段非零才视为真实观测帧；所有信号字段均为零的补位帧不参与覆盖范围、帧数与连续性判定。
+- 数据集 A `a_down_inside_saved_window`：真实 IMU 帧按绝对时间排序后，最早帧时间不晚于按下时刻且最晚帧时间不早于按下时刻。A 仅保存 `manifest.csv` 与统计摘要，保留源 JSON 的绝对路径和按下定位诊断，不复制源文件。
+- 数据集 B `b_complete_down_minus5_plus9`：必须先属于 A；选择距离按下时间最近的真实 IMU 帧作为 0 帧，要求其前方至少 5 帧、后方至少 9 帧，0 帧误差不超过 `0.75` 个采样周期，选中窗口相邻帧间隔不超过 `1.75` 个采样周期。B 因而严格是 A 的子集，且不允许补零、插值或外推。
+- B 派生 JSON：写入 `sourceId`、`sourcePath`、`sourceSchemaVersion`、`label`、`downAnchorTimestamp`、`downReferenceFrameIndex`、`sampleRateHz` 和 `downFrames`。`downFrames` 固定为 15 个真实帧，重新编号为 `-5...+9`，同时保留 `sourceFrameIndex`、`sourceRelativeTimestamp` 与 `sourceTimeSinceTouchDown` 供审计。
+- A/B `manifest.csv`：共同记录样本 ID、源 SHA-256、源路径、schema、采集者、设备、日期、session、类别、按下时间及来源、原锚点时间、采样率、虚拟按下帧位置、最近源帧、定位误差、按下前后真实帧数、真实帧总数与补位帧数；B 额外记录派生 JSON 相对路径。各级 `summary.json` 汇总保留数、排除原因、schema、采集者、设备和类别分布。
+- 构建命令：`python android/analysis/build_historical_down_anchor_datasets.py --source-manifest data/deduplicated_raw/manifest.csv --output-dir data/down_anchor_historical_20260731`。输出先写入同级临时目录，成功后整体发布，避免中断时留下半成品结果。
+
 ## Impact Dashboard GitHub Pages 部署补充
 - `docs/impact_dashboard/index.html`：作为 GitHub Pages 发布副本，复用本地 `tools/impact_dashboard/dashboard.html` 的静态内容，并将下载链接改为相对路径，确保项目站点子路径下可正常访问 `latest_samples.csv`。
 - `docs/impact_dashboard/data`：保存发布用 `latest_samples.json` 与 `latest_samples.csv` 静态数据副本，避免 GitHub Pages 直接暴露工具目录，便于后续独立替换数据文件。
@@ -306,3 +315,4 @@
 - 2026-06-25：针对手机实测食指/拇指同强度混淆，新增 OnePlus 四分类时间留出复核；确认随机切分因连续采集段泄漏而高估 `old13_raw_radius`，端侧默认四分类模型改为时间留出更稳的 `oneplus_four_class_hard_core_old13`，并保留 raw radius 版本作为第二项对照。
 - 2026-06-25：补采后从 OnePlus PHK110 导出 `4641` 条原生 JSON，修正四分类数据构建脚本优先使用真实 `finger_type`，训练和消融脚本新增 temporal split；基于 hard_v2 每类 `321` 条样本完成 `25%` 与 `10%` 最新尾段时间留出全量消融，并将 `10%` 留出当前第一名 preset 的 nearfull 装机版 `oneplus_four_class_after_recollect_hard_nearfull_old13_raw_radius` 置顶 catalog 且设为端侧默认四分类模型，`temporal10` 训练版保留为第二项对照。
 - 2026-06-26：修复四分类训练未生效使用 `sample_weight` 的缺陷，重新跑 weighted temporal10 核心消融；`old13_multichannel` 以约 `87.50%` 平衡准确率、`81.25%` 最小召回和更少同强度手指互混胜出，新增 weighted nearfull 装机模型 `oneplus_four_class_after_recollect_hard_nearfull_weighted_old13_multichannel` 并切为端侧默认。
+- 2026-07-31：新增历史按下锚点 A/B 数据集筛选脚本与审计结构；A 保留按下时刻位于真实 IMU 覆盖范围内的样本，B 从 A 中进一步保留可完整提取真实 `-5...+9` 连续窗口的样本，明确排除全零补位帧且不修改源 JSON。
