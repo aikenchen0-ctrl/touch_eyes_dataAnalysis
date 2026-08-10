@@ -5,6 +5,63 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 public final class AispectModels {
+    static final String[] RAW_FRAME_FIELDS = new String[]{
+            "frameIndex",
+            "relativeTimestamp",
+            "x",
+            "y",
+            "z",
+            "x_norm",
+            "y_norm",
+            "rotationRateX",
+            "rotationRateY",
+            "rotationRateZ",
+            "gravityX",
+            "gravityY",
+            "gravityZ",
+            "timeSinceTouchDown",
+            "timeSinceAnchor",
+            "sensorTimestampElapsedRealtimeNanos",
+            "receivedElapsedRealtimeNanos"
+    };
+
+    static boolean containsRawFrameField(String field) {
+        if (field == null) {
+            return false;
+        }
+        for (String candidate : RAW_FRAME_FIELDS) {
+            if (field.equals(candidate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static final class CollectorIdentity {
+        public final String userName;
+        public final String deviceId;
+
+        public CollectorIdentity(String userName, String deviceId) {
+            this.userName = normalizeUserName(userName);
+            this.deviceId = deviceId == null ? "" : deviceId.trim();
+        }
+
+        public static String normalizeUserName(String value) {
+            return value == null ? "" : value.trim();
+        }
+
+        public static boolean isValidUserName(String value) {
+            return !normalizeUserName(value).isEmpty();
+        }
+
+        JSONObject toJson() throws JSONException {
+            JSONObject json = new JSONObject();
+            json.put("userName", userName);
+            json.put("deviceId", deviceId);
+            return json;
+        }
+    }
+
     private AispectModels() {
     }
 
@@ -149,6 +206,8 @@ public final class AispectModels {
         public final double timeSinceTouchDown;
         public final double timeSinceAnchor;
         public final double timestampSeconds;
+        public final long sensorTimestampElapsedRealtimeNanos;
+        public final long receivedElapsedRealtimeNanos;
 
         public ImpactFrame(
                 double delta,
@@ -167,6 +226,46 @@ public final class AispectModels {
                 double timeSinceAnchor,
                 double timestampSeconds
         ) {
+            this(
+                    delta,
+                    x,
+                    y,
+                    z,
+                    rotationRateX,
+                    rotationRateY,
+                    rotationRateZ,
+                    gravityX,
+                    gravityY,
+                    gravityZ,
+                    xNorm,
+                    yNorm,
+                    timeSinceTouchDown,
+                    timeSinceAnchor,
+                    timestampSeconds,
+                    0L,
+                    0L
+            );
+        }
+
+        public ImpactFrame(
+                double delta,
+                double x,
+                double y,
+                double z,
+                double rotationRateX,
+                double rotationRateY,
+                double rotationRateZ,
+                double gravityX,
+                double gravityY,
+                double gravityZ,
+                double xNorm,
+                double yNorm,
+                double timeSinceTouchDown,
+                double timeSinceAnchor,
+                double timestampSeconds,
+                long sensorTimestampElapsedRealtimeNanos,
+                long receivedElapsedRealtimeNanos
+        ) {
             this.delta = delta;
             this.x = x;
             this.y = y;
@@ -182,6 +281,8 @@ public final class AispectModels {
             this.timeSinceTouchDown = timeSinceTouchDown;
             this.timeSinceAnchor = timeSinceAnchor;
             this.timestampSeconds = timestampSeconds;
+            this.sensorTimestampElapsedRealtimeNanos = sensorTimestampElapsedRealtimeNanos;
+            this.receivedElapsedRealtimeNanos = receivedElapsedRealtimeNanos;
         }
 
         public static ImpactFrame zero() {
@@ -191,8 +292,7 @@ public final class AispectModels {
         JSONObject toJson(int frameIndex) throws JSONException {
             JSONObject json = new JSONObject();
             json.put("frameIndex", frameIndex);
-            json.put("relativeTimestamp", timeSinceAnchor);
-            json.put("delta", delta);
+            json.put("relativeTimestamp", timeSinceTouchDown);
             json.put("x", x);
             json.put("y", y);
             json.put("z", z);
@@ -206,6 +306,8 @@ public final class AispectModels {
             json.put("gravityZ", gravityZ);
             json.put("timeSinceTouchDown", timeSinceTouchDown);
             json.put("timeSinceAnchor", timeSinceAnchor);
+            json.put("sensorTimestampElapsedRealtimeNanos", sensorTimestampElapsedRealtimeNanos);
+            json.put("receivedElapsedRealtimeNanos", receivedElapsedRealtimeNanos);
             return json;
         }
     }

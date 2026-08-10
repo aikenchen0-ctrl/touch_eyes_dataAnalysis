@@ -12,6 +12,7 @@ import numpy as np
 from train_android_touch_cnn import DEFAULT_FEATURES
 from train_android_touch_cnn import PATCH_FEATURES
 from train_android_touch_cnn import feature_value
+from train_android_touch_cnn import frame_index_for_reference
 
 
 FEATURE_GROUPS = {
@@ -99,7 +100,7 @@ def load_dataset(manifest_path, frame_indices):
                 by_index[int_value(frame.get("frameIndex"), 0)] = frame
             base = []
             for frame_index in frame_indices:
-                frame = by_index.get(frame_index, {})
+                frame = by_index.get(frame_index_for_reference(data, frame_index), {})
                 for name in DEFAULT_FEATURES:
                     base.append(finite_float(feature_value(data, frame, name), 0.0))
             patch = [finite_float(feature_value(data, {}, name), 0.0) for name in PATCH_FEATURES]

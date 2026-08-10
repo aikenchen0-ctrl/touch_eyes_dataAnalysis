@@ -8,6 +8,8 @@ import org.json.JSONObject;
 public final class AispectTouchFrame {
     public final double relativeTimestampSeconds;
     public final long eventTimeMillis;
+    public final long eventElapsedRealtimeNanos;
+    public final long receivedElapsedRealtimeNanos;
     public final float x;
     public final float y;
     public final int width;
@@ -34,6 +36,8 @@ public final class AispectTouchFrame {
     private AispectTouchFrame(
             double relativeTimestampSeconds,
             long eventTimeMillis,
+            long eventElapsedRealtimeNanos,
+            long receivedElapsedRealtimeNanos,
             float x,
             float y,
             int width,
@@ -57,6 +61,8 @@ public final class AispectTouchFrame {
     ) {
         this.relativeTimestampSeconds = relativeTimestampSeconds;
         this.eventTimeMillis = eventTimeMillis;
+        this.eventElapsedRealtimeNanos = eventElapsedRealtimeNanos;
+        this.receivedElapsedRealtimeNanos = receivedElapsedRealtimeNanos;
         this.x = x;
         this.y = y;
         this.width = width;
@@ -82,11 +88,36 @@ public final class AispectTouchFrame {
     }
 
     public static AispectTouchFrame fromCurrent(MotionEvent event, int pointerIndex, long downEventTime, int width, int height) {
-        return makeFrame(event, pointerIndex, -1, downEventTime, width, height);
+        return makeFrame(event, pointerIndex, -1, downEventTime, width, height, 0L, 0L);
     }
 
     public static AispectTouchFrame fromHistorical(MotionEvent event, int pointerIndex, int historyIndex, long downEventTime, int width, int height) {
-        return makeFrame(event, pointerIndex, historyIndex, downEventTime, width, height);
+        return makeFrame(event, pointerIndex, historyIndex, downEventTime, width, height, 0L, 0L);
+    }
+
+    public static AispectTouchFrame fromCurrent(
+            MotionEvent event,
+            int pointerIndex,
+            long downEventTime,
+            int width,
+            int height,
+            long receivedUptimeMillis,
+            long receivedElapsedRealtimeNanos
+    ) {
+        return makeFrame(event, pointerIndex, -1, downEventTime, width, height, receivedUptimeMillis, receivedElapsedRealtimeNanos);
+    }
+
+    public static AispectTouchFrame fromHistorical(
+            MotionEvent event,
+            int pointerIndex,
+            int historyIndex,
+            long downEventTime,
+            int width,
+            int height,
+            long receivedUptimeMillis,
+            long receivedElapsedRealtimeNanos
+    ) {
+        return makeFrame(event, pointerIndex, historyIndex, downEventTime, width, height, receivedUptimeMillis, receivedElapsedRealtimeNanos);
     }
 
     JSONObject toJson(int frameIndex) throws JSONException {
@@ -94,8 +125,14 @@ public final class AispectTouchFrame {
         json.put("frameIndex", frameIndex);
         json.put("relativeTimestamp", relativeTimestampSeconds);
         json.put("eventTimeMillis", eventTimeMillis);
+        json.put("eventElapsedRealtimeNanos", eventElapsedRealtimeNanos);
+        json.put("receivedElapsedRealtimeNanos", receivedElapsedRealtimeNanos);
+        json.put("viewWidthPx", width);
+        json.put("viewHeightPx", height);
         json.put("x", x);
         json.put("y", y);
+        json.put("viewWidthPx", width);
+        json.put("viewHeightPx", height);
         json.put("x_norm", xNorm);
         json.put("y_norm", yNorm);
         json.put("pressure", pressure);
@@ -120,7 +157,90 @@ public final class AispectTouchFrame {
         return json;
     }
 
-    private static AispectTouchFrame makeFrame(MotionEvent event, int pointerIndex, int historyIndex, long downEventTime, int width, int height) {
+    static AispectTouchFrame forTesting(
+            long receivedElapsedRealtimeNanos,
+            float x,
+            float y,
+            int width,
+            int height,
+            float pressure,
+            float size,
+            float touchMajor,
+            float touchMinor,
+            float orientation,
+            int pointerCount,
+            boolean hasOrientationRange
+    ) {
+        return forTesting(
+                0L,
+                receivedElapsedRealtimeNanos,
+                x,
+                y,
+                width,
+                height,
+                pressure,
+                size,
+                touchMajor,
+                touchMinor,
+                orientation,
+                pointerCount,
+                hasOrientationRange
+        );
+    }
+
+    static AispectTouchFrame forTesting(
+            long eventElapsedRealtimeNanos,
+            long receivedElapsedRealtimeNanos,
+            float x,
+            float y,
+            int width,
+            int height,
+            float pressure,
+            float size,
+            float touchMajor,
+            float touchMinor,
+            float orientation,
+            int pointerCount,
+            boolean hasOrientationRange
+    ) {
+        return new AispectTouchFrame(
+                0.0,
+                0L,
+                eventElapsedRealtimeNanos,
+                receivedElapsedRealtimeNanos,
+                x,
+                y,
+                width,
+                height,
+                pressure,
+                size,
+                touchMajor,
+                touchMinor,
+                0f,
+                0f,
+                orientation,
+                MotionEvent.TOOL_TYPE_FINGER,
+                pointerCount,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                hasOrientationRange
+        );
+    }
+
+    private static AispectTouchFrame makeFrame(
+            MotionEvent event,
+            int pointerIndex,
+            int historyIndex,
+            long downEventTime,
+            int width,
+            int height,
+            long receivedUptimeMillis,
+            long receivedElapsedRealtimeNanos
+    ) {
         boolean isHistorical = historyIndex >= 0;
         long eventTime = isHistorical ? event.getHistoricalEventTime(historyIndex) : event.getEventTime();
         float x = isHistorical ? event.getHistoricalX(pointerIndex, historyIndex) : event.getX(pointerIndex);
@@ -132,6 +252,14 @@ public final class AispectTouchFrame {
         return new AispectTouchFrame(
                 (eventTime - downEventTime) / 1000.0,
                 eventTime,
+                receivedElapsedRealtimeNanos > 0L
+                        ? AispectCaptureClock.uptimeMillisToElapsedRealtimeNanos(
+                        eventTime,
+                        receivedUptimeMillis,
+                        receivedElapsedRealtimeNanos
+                )
+                        : 0L,
+                receivedElapsedRealtimeNanos,
                 x,
                 y,
                 width,

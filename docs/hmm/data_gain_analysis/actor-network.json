@@ -1,0 +1,431 @@
+{
+  "artifact": "actor-network",
+  "analysisId": "existing-data-limited-gain-20260731",
+  "dependsOn": "resource-graph.json",
+  "networkPurpose": "trace how touch intent becomes training data, a deployed model, and real-world classification feedback",
+  "actors": [
+    {
+      "id": "a_owner",
+      "kind": "human_role",
+      "role": [
+        "payer",
+        "decision_maker",
+        "acceptance_authority"
+      ],
+      "controls": [
+        "collection_scope",
+        "training_direction",
+        "default_model",
+        "deployment_acceptance"
+      ]
+    },
+    {
+      "id": "a_collectors",
+      "kind": "human_group",
+      "role": [
+        "data_producer",
+        "manual_label_source"
+      ],
+      "knownIdentities": [
+        "lemon",
+        "tao",
+        "zhuo"
+      ],
+      "controls": [
+        "touch_gesture",
+        "subjective_strength_boundary",
+        "finger_posture",
+        "collection_cadence"
+      ]
+    },
+    {
+      "id": "a_touch_users",
+      "kind": "human_group",
+      "role": [
+        "signal_origin",
+        "core_user"
+      ],
+      "controls": [
+        "physical_touch_intent",
+        "natural_behavior_variation"
+      ]
+    },
+    {
+      "id": "a_devices",
+      "kind": "technical_actor",
+      "role": [
+        "sensor_provider",
+        "domain_generator"
+      ],
+      "knownFamilies": [
+        "xiaomi_2308cpxd0c",
+        "oneplus_le2110",
+        "oneplus_phk110"
+      ],
+      "controls": [
+        "touch_axis_scale",
+        "touch_frame_duration",
+        "imu_scale_and_noise",
+        "sampling_timing"
+      ]
+    },
+    {
+      "id": "a_collection_runtime",
+      "kind": "technical_actor",
+      "role": [
+        "event_recorder",
+        "schema_writer"
+      ],
+      "controls": [
+        "schema_version",
+        "frame_capture",
+        "timestamp_alignment",
+        "stored_metadata"
+      ]
+    },
+    {
+      "id": "a_raw_dataset",
+      "kind": "data_actor",
+      "role": [
+        "source_of_truth"
+      ],
+      "controls": [
+        "available_training_evidence"
+      ]
+    },
+    {
+      "id": "a_cleaning_pipeline",
+      "kind": "technical_actor",
+      "role": [
+        "quality_filter",
+        "sample_weighter",
+        "temporal_thinner"
+      ],
+      "controls": [
+        "sample_acceptance",
+        "review_weight",
+        "effective_row_count"
+      ]
+    },
+    {
+      "id": "a_split_pipeline",
+      "kind": "technical_actor",
+      "role": [
+        "evaluation_boundary_setter"
+      ],
+      "controls": [
+        "train_valid_independence",
+        "domain_holdout",
+        "session_isolation",
+        "reported_difficulty"
+      ]
+    },
+    {
+      "id": "a_feature_pipeline",
+      "kind": "technical_actor",
+      "role": [
+        "signal_selector",
+        "representation_builder"
+      ],
+      "controls": [
+        "window_anchor",
+        "frame_window",
+        "feature_channels",
+        "normalization",
+        "missing_frame_encoding"
+      ]
+    },
+    {
+      "id": "a_training_pipeline",
+      "kind": "technical_actor",
+      "role": [
+        "parameter_optimizer",
+        "model_exporter"
+      ],
+      "controls": [
+        "class_weighting",
+        "group_balance",
+        "model_capacity",
+        "epoch_selection"
+      ]
+    },
+    {
+      "id": "a_random_evaluator",
+      "kind": "anti_system_actor",
+      "role": [
+        "diagnostic_evaluator"
+      ],
+      "controls": [
+        "random_validation_metrics"
+      ]
+    },
+    {
+      "id": "a_strict_evaluator",
+      "kind": "anti_system_actor",
+      "role": [
+        "generalization_evaluator"
+      ],
+      "controls": [
+        "domain_metrics",
+        "collection_metrics",
+        "temporal_metrics",
+        "session_leakage_checks"
+      ]
+    },
+    {
+      "id": "a_deployment_pipeline",
+      "kind": "technical_actor",
+      "role": [
+        "model_packager",
+        "default_model_setter"
+      ],
+      "controls": [
+        "android_assets",
+        "catalog_order",
+        "default_model_id"
+      ]
+    },
+    {
+      "id": "a_android_runtime",
+      "kind": "technical_actor",
+      "role": [
+        "realtime_preprocessor",
+        "inference_executor"
+      ],
+      "controls": [
+        "runtime_frame_window",
+        "runtime_feature_values",
+        "prediction_trigger",
+        "early_and_final_model_routing",
+        "displayed_result"
+      ]
+    },
+    {
+      "id": "a_phone_tester",
+      "kind": "human_role",
+      "role": [
+        "real_world_evaluator",
+        "acceptance_feedback_source"
+      ],
+      "controls": [
+        "real_world_trials",
+        "subjective_acceptance",
+        "rollback_request"
+      ]
+    },
+    {
+      "id": "a_downstream_users",
+      "kind": "affected_group",
+      "role": [
+        "externality_bearer",
+        "future_user"
+      ],
+      "controls": [
+        "continued_use",
+        "future_feedback"
+      ]
+    }
+  ],
+  "interactions": [
+    {
+      "from": "a_owner",
+      "to": "a_collectors",
+      "function": "defines_collection_goal",
+      "polarity": "positive",
+      "condition": "label definitions and collection protocol are explicit"
+    },
+    {
+      "from": "a_touch_users",
+      "to": "a_devices",
+      "function": "applies_physical_touch",
+      "polarity": "positive",
+      "condition": "natural touch behavior is represented"
+    },
+    {
+      "from": "a_collectors",
+      "to": "a_collection_runtime",
+      "function": "provides_manual_label_and_repeated_trials",
+      "polarity": "mixed",
+      "harmfulEffect": "subjective labels and rapid repeated trials may create correlated or inconsistent evidence",
+      "condition": "no external force reference and repeated same-session collection"
+    },
+    {
+      "from": "a_devices",
+      "to": "a_collection_runtime",
+      "function": "provides_touch_and_imu_signal",
+      "polarity": "mixed",
+      "harmfulEffect": "device-specific scales and timing may dominate class-specific signal",
+      "condition": "device variation is correlated with collector, date, or label distribution"
+    },
+    {
+      "from": "a_collection_runtime",
+      "to": "a_raw_dataset",
+      "function": "writes_labeled_sample",
+      "polarity": "positive",
+      "condition": "schema and timestamps remain valid"
+    },
+    {
+      "from": "a_raw_dataset",
+      "to": "a_cleaning_pipeline",
+      "function": "supplies_samples_and_metadata",
+      "polarity": "positive",
+      "condition": "manifest references remain valid"
+    },
+    {
+      "from": "a_cleaning_pipeline",
+      "to": "a_split_pipeline",
+      "function": "supplies_weighted_and_thinned_rows",
+      "polarity": "mixed",
+      "harmfulEffect": "quality filtering may preserve domain imbalance or remove valid boundary cases",
+      "condition": "quality rules use imperfect proxies for label correctness"
+    },
+    {
+      "from": "a_split_pipeline",
+      "to": "a_training_pipeline",
+      "function": "defines_training_and_validation_evidence",
+      "polarity": "mixed",
+      "harmfulEffect": "random splitting can make correlated domains appear generalizable",
+      "condition": "sample-level random split shares sessions or domains across partitions"
+    },
+    {
+      "from": "a_feature_pipeline",
+      "to": "a_training_pipeline",
+      "function": "provides_model_input_representation",
+      "polarity": "mixed",
+      "harmfulEffect": "representation may expose device identity more strongly than class identity",
+      "condition": "global normalization and raw timing or geometry preserve domain offsets"
+    },
+    {
+      "from": "a_training_pipeline",
+      "to": "a_random_evaluator",
+      "function": "provides_candidate_predictions",
+      "polarity": "positive",
+      "condition": "random metrics remain diagnostic only"
+    },
+    {
+      "from": "a_training_pipeline",
+      "to": "a_strict_evaluator",
+      "function": "provides_candidate_predictions",
+      "polarity": "positive",
+      "condition": "held-out domains and sessions remain unseen"
+    },
+    {
+      "from": "a_random_evaluator",
+      "to": "a_owner",
+      "function": "reports_seen_distribution_performance",
+      "polarity": "mixed",
+      "harmfulEffect": "high random metrics may receive more decision weight than real-world generalization evidence",
+      "condition": "deployment policy does not distinguish diagnostic and release metrics"
+    },
+    {
+      "from": "a_strict_evaluator",
+      "to": "a_owner",
+      "function": "reports_generalization_risk",
+      "polarity": "positive",
+      "condition": "strict metrics have release-gate authority"
+    },
+    {
+      "from": "a_owner",
+      "to": "a_deployment_pipeline",
+      "function": "selects_model_for_phone_test",
+      "polarity": "positive",
+      "condition": "selection basis is explicit"
+    },
+    {
+      "from": "a_deployment_pipeline",
+      "to": "a_android_runtime",
+      "function": "installs_model_and_runtime_configuration",
+      "polarity": "mixed",
+      "harmfulEffect": "offline and runtime preprocessing may diverge without equivalence evidence",
+      "condition": "feature construction is duplicated across Python and Android"
+    },
+    {
+      "from": "a_android_runtime",
+      "to": "a_phone_tester",
+      "function": "emits_realtime_classification",
+      "polarity": "mixed",
+      "harmfulEffect": "the current early model uses one ACTION_DOWN touch frame while the final model uses a fixed IMU window anchored near touch end, so their available signals and targets are not directly comparable",
+      "condition": "the requested ACTION_DOWN-anchored pre-roll and post-roll IMU window has not been implemented"
+    },
+    {
+      "from": "a_phone_tester",
+      "to": "a_owner",
+      "function": "reports_real_world_acceptance",
+      "polarity": "mixed",
+      "harmfulEffect": "unstructured feedback cannot isolate class, device, timing, or runtime causes",
+      "condition": "trials lack expected-label records and a confusion matrix"
+    },
+    {
+      "from": "a_android_runtime",
+      "to": "a_downstream_users",
+      "function": "provides_embedded_classification_service",
+      "polarity": "mixed",
+      "harmfulEffect": "domain-specific errors propagate to every reused application",
+      "condition": "one pooled model is reused without validated domain coverage"
+    }
+  ],
+  "criticalDependencyNodes": [
+    {
+      "actorId": "a_split_pipeline",
+      "reason": "determines whether validation measures memorization or independent generalization"
+    },
+    {
+      "actorId": "a_feature_pipeline",
+      "reason": "determines whether model input emphasizes class information or domain identity"
+    },
+    {
+      "actorId": "a_strict_evaluator",
+      "reason": "must convert cross-domain evidence into a release decision"
+    },
+    {
+      "actorId": "a_android_runtime",
+      "reason": "must reproduce offline features and timing before model quality can transfer"
+    },
+    {
+      "actorId": "a_phone_tester",
+      "reason": "provides final evidence but currently lacks structured writeback"
+    }
+  ],
+  "networkBottlenecks": [
+    {
+      "id": "b_domain_signal",
+      "path": [
+        "a_collectors",
+        "a_devices",
+        "a_collection_runtime",
+        "a_feature_pipeline",
+        "a_training_pipeline"
+      ],
+      "effect": "collector and device identity can be learned as a shortcut for class prediction"
+    },
+    {
+      "id": "b_weak_release_gate",
+      "path": [
+        "a_strict_evaluator",
+        "a_owner",
+        "a_deployment_pipeline"
+      ],
+      "effect": "strict generalization evidence does not consistently control deployment"
+    },
+    {
+      "id": "b_feedback_writeback",
+      "path": [
+        "a_android_runtime",
+        "a_phone_tester",
+        "a_owner",
+        "a_training_pipeline"
+      ],
+      "effect": "phone failures are observed but cannot be attributed and converted into targeted training changes"
+    },
+    {
+      "id": "b_window_anchor_semantics",
+      "path": [
+        "a_collection_runtime",
+        "a_feature_pipeline",
+        "a_training_pipeline",
+        "a_android_runtime"
+      ],
+      "effect": "touch-end-anchored IMU windows, ACTION_DOWN single-frame features, and a proposed ACTION_DOWN-anchored IMU window can be mistaken for the same input contract"
+    }
+  ]
+}

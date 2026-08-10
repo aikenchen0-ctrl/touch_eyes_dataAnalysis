@@ -29,9 +29,6 @@ final class RootViewController: UIViewController {
     private let isImpactTestEnabled = true
     private var isTouchActive = false
     private var didImpactHeavyPress = false
-    private var impactWindowStart: TimeInterval = 0
-    private let impactWindowDuration: TimeInterval = 0.25
-    private var lastAispectEvent: AispectTouchEvent?
     private var hapticOption: AispectHapticOption = .impactRigid
     private var impactHaptic = UIImpactFeedbackGenerator(style: .rigid)
     private let notificationHaptic = UINotificationFeedbackGenerator()
@@ -66,12 +63,15 @@ final class RootViewController: UIViewController {
         // 中文注释：页面可见时预热闭眼检测链路，避免轻点时再冷启动相机。
         impactTestView.setBlinkPrepareLatency(nil)
         blinkDetector.prepare()
+        // 中文注释：验证模式需要按下前的滚动 IMU 缓存，页面可见时提前预热传感器。
+        impactDetector.start()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         // 中文注释：页面离开后立即挂起相机会话，避免待机功耗持续存在。
         blinkDetector.suspend()
+        impactDetector.stop()
     }
 
     private func setupLayout() {
@@ -190,11 +190,7 @@ final class RootViewController: UIViewController {
     private func setupAispect() {
         // 中文注释：采样节流间隔用于样本更新频率控制。
         aispectEngine.minimumSampleInterval = 1.0 / 240.0
-        // 中文注释：冲击阈值调节与测试面板联动。
-        impactTestView.setImpactThreshold(CGFloat(impactDetector.config.impactDeltaThreshold))
-        impactTestView.onImpactThresholdChanged = { [weak self] value in
-            self?.impactDetector.config.impactDeltaThreshold = Double(value)
-        }
+        // 中文注释：固定按下窗口不再使用 delta 阈值；面板只显示窗口状态。
         impactTestView.setHapticOption(hapticOption)
         impactTestView.onHapticOptionChanged = { [weak self] option in
             self?.hapticOption = option
@@ -256,10 +252,6 @@ final class RootViewController: UIViewController {
     }
 
     private func setupImpactDetector() {
-        // 中文注释：冲击事件与面板显示绑定。
-        impactDetector.onImpact = { [weak self] delta in
-            self?.handleImpactDetected(delta: delta)
-        }
         impactDetector.onSampleRate = { [weak self] hz in
             self?.impactTestView.setImpactSampleRate(hz)
         }
@@ -313,27 +305,6 @@ final class RootViewController: UIViewController {
         }
     }
 
-    private func handleImpactDetected(delta: Double) {
-        guard isTouchActive else { return }
-        guard !didImpactHeavyPress else { return }
-        guard let lastEvent = lastAispectEvent else { return }
-        let timeSinceStart = lastEvent.timestamp - impactWindowStart
-        // 中文注释：仅在短触摸窗口内接受冲击判定。
-        if timeSinceStart > impactWindowDuration { return }
-        if lastEvent.kind == .heavyPress || lastEvent.kind == .heavyHold { return }
-        didImpactHeavyPress = true
-        triggerHaptic(hapticOption)
-        let synthetic = AispectTouchEvent(
-            kind: .heavyPress,
-            location: lastEvent.location,
-            timestamp: lastEvent.timestamp
-        )
-        aispectRouter.handle(event: synthetic, in: view)
-        updateVisualEffects(for: synthetic)
-        showHoldControl(at: synthetic.location)
-        showHeavyIndicator(at: synthetic.location)
-    }
-
     private func triggerHaptic(_ option: AispectHapticOption) {
         if let style = option.impactStyle {
             impactHaptic = UIImpactFeedbackGenerator(style: style)
@@ -362,15 +333,13 @@ extension RootViewController: UIGestureRecognizerDelegate {
 
 extension RootViewController: AispectGestureDelegate {
     func aispectRecognizer(_ recognizer: AispectGestureRecognizer, didEmit event: AispectTouchEvent) {
-        lastAispectEvent = event
         if event.kind == .sample, !isTouchActive {
             // 中文注释：首次触摸进入冲击监听窗口。
             pendingImpactStopWork?.cancel()
             isTouchActive = true
             didImpactHeavyPress = false
-            impactWindowStart = event.timestamp
-            impactDetector.beginDatasetCapture(at: event.timestamp)
             impactDetector.start()
+            impactDetector.beginDatasetCapture(at: event.timestamp)
         }
         if event.kind == .heavyPress || event.kind == .heavyHold {
             didImpactHeavyPress = true
@@ -450,6 +419,7 @@ extension RootViewController {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             guard !self.isTouchActive else { return }
+            guard !self.impactDetector.isDatasetCollectionEnabled else { return }
             self.impactDetector.stop()
         }
         pendingImpactStopWork = work

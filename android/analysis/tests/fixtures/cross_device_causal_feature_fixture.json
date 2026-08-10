@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 6,
+  "timeAlignment": {
+    "clock": "elapsedRealtimeNanos",
+    "downEventElapsedRealtimeNanos": 1000000000,
+    "downReceivedElapsedRealtimeNanos": 1002000000,
+    "liftEventElapsedRealtimeNanos": 2000000000,
+    "liftReceivedElapsedRealtimeNanos": 2002000000,
+    "availabilityRule": "touchReceivedElapsedRealtimeNanos<=imuReceivedElapsedRealtimeNanos"
+  },
+  "sensorMetadata": {
+    "platform": "android",
+    "sensorSource": "linear_acceleration",
+    "accelerationUnit": "m/s^2",
+    "rotationRateUnit": "rad/s",
+    "sensorAxisFrame": "canonical_device",
+    "axisTransformMatrix": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    "transformVersion": "cross_device_v1"
+  },
+  "touchMetadata": {
+    "touchUnit": "pixels",
+    "touchTransformVersion": "cross_device_v1"
+  },
+  "records": {
+    "android_200hz": {
+      "frames": [
+        {"sensorTimestampElapsedRealtimeNanos": 980000000, "receivedElapsedRealtimeNanos": 982000000, "x": -2.0, "y": -1.0, "z": 0.0, "rotationRateX": 0.0, "rotationRateY": 0.0, "rotationRateZ": 0.0, "gravityX": 0.0, "gravityY": 0.0, "gravityZ": 9.8},
+        {"sensorTimestampElapsedRealtimeNanos": 990000000, "receivedElapsedRealtimeNanos": 992000000, "x": -1.0, "y": 0.0, "z": 1.0, "rotationRateX": 1.0, "rotationRateY": 2.0, "rotationRateZ": 3.0, "gravityX": 0.0, "gravityY": 0.0, "gravityZ": 9.8},
+        {"sensorTimestampElapsedRealtimeNanos": 1000000000, "receivedElapsedRealtimeNanos": 1002000000, "x": 0.0, "y": 1.0, "z": 2.0, "rotationRateX": 2.0, "rotationRateY": 4.0, "rotationRateZ": 6.0, "gravityX": 0.0, "gravityY": 0.0, "gravityZ": 9.8},
+        {"sensorTimestampElapsedRealtimeNanos": 1010000000, "receivedElapsedRealtimeNanos": 1012000000, "x": 1.0, "y": 2.0, "z": 3.0, "rotationRateX": 3.0, "rotationRateY": 6.0, "rotationRateZ": 9.0, "gravityX": 0.0, "gravityY": 0.0, "gravityZ": 9.8},
+        {"sensorTimestampElapsedRealtimeNanos": 1020000000, "receivedElapsedRealtimeNanos": 1022000000, "x": 2.0, "y": 3.0, "z": 4.0, "rotationRateX": 4.0, "rotationRateY": 8.0, "rotationRateZ": 12.0, "gravityX": 0.0, "gravityY": 0.0, "gravityZ": 9.8},
+        {"sensorTimestampElapsedRealtimeNanos": 1030000000, "receivedElapsedRealtimeNanos": 1032000000, "x": 3.0, "y": 4.0, "z": 5.0, "rotationRateX": 5.0, "rotationRateY": 10.0, "rotationRateZ": 15.0, "gravityX": 0.0, "gravityY": 0.0, "gravityZ": 9.8}
+      ],
+      "touchFrames": [
+        {"eventElapsedRealtimeNanos": 990000000, "receivedElapsedRealtimeNanos": 990500000, "x_norm": 0.2, "y_norm": 0.3, "pressure": 0.5, "size": 0.2, "touchMajor": 20.0, "touchMinor": 10.0, "orientation": 0.0, "pointerCount": 1, "viewWidthPx": 1000, "viewHeightPx": 2000, "axisAvailability": {"hasOrientationRange": true}},
+        {"eventElapsedRealtimeNanos": 1015000000, "receivedElapsedRealtimeNanos": 1018000000, "x_norm": 0.8, "y_norm": 0.7, "pressure": 0.6, "size": 0.3, "touchMajor": 30.0, "touchMinor": 15.0, "orientation": 0.2, "pointerCount": 1, "viewWidthPx": 1000, "viewHeightPx": 2000, "axisAvailability": {"hasOrientationRange": true}}
+      ]
+    },
+    "android_100hz": {
+      "frames": [
+        {"sensorTimestampElapsedRealtimeNanos": 970000000, "receivedElapsedRealtimeNanos": 972000000, "x": -3.0, "y": -2.0, "z": -1.0, "rotationRateX": -1.0, "rotationRateY": -2.0, "rotationRateZ": -3.0, "gravityX": 0.0, "gravityY": 0.0, "gravityZ": 9.8},
+        {"sensorTimestampElapsedRealtimeNanos": 980000000, "receivedElapsedRealtimeNanos": 982000000, "x": -2.0, "y": -1.0, "z": 0.0, "rotationRateX": 0.0, "rotationRateY": 0.0, "rotationRateZ": 0.0, "gravityX": 0.0, "gravityY": 0.0, "gravityZ": 9.8},
+        {"sensorTimestampElapsedRealtimeNanos": 990000000, "receivedElapsedRealtimeNanos": 992000000, "x": -1.0, "y": 0.0, "z": 1.0, "rotationRateX": 1.0, "rotationRateY": 2.0, "rotationRateZ": 3.0, "gravityX": 0.0, "gravityY": 0.0, "gravityZ": 9.8},
+        {"sensorTimestampElapsedRealtimeNanos": 1000000000, "receivedElapsedRealtimeNanos": 1002000000, "x": 0.0, "y": 1.0, "z": 2.0, "rotationRateX": 2.0, "rotationRateY": 4.0, "rotationRateZ": 6.0, "gravityX": 0.0, "gravityY": 0.0, "gravityZ": 9.8},
+        {"sensorTimestampElapsedRealtimeNanos": 1010000000, "receivedElapsedRealtimeNanos": 1012000000, "x": 1.0, "y": 2.0, "z": 3.0, "rotationRateX": 3.0, "rotationRateY": 6.0, "rotationRateZ": 9.0, "gravityX": 0.0, "gravityY": 0.0, "gravityZ": 9.8},
+        {"sensorTimestampElapsedRealtimeNanos": 1020000000, "receivedElapsedRealtimeNanos": 1022000000, "x": 2.0, "y": 3.0, "z": 4.0, "rotationRateX": 4.0, "rotationRateY": 8.0, "rotationRateZ": 12.0, "gravityX": 0.0, "gravityY": 0.0, "gravityZ": 9.8},
+        {"sensorTimestampElapsedRealtimeNanos": 1030000000, "receivedElapsedRealtimeNanos": 1032000000, "x": 3.0, "y": 4.0, "z": 5.0, "rotationRateX": 5.0, "rotationRateY": 10.0, "rotationRateZ": 15.0, "gravityX": 0.0, "gravityY": 0.0, "gravityZ": 9.8},
+        {"sensorTimestampElapsedRealtimeNanos": 1040000000, "receivedElapsedRealtimeNanos": 1042000000, "x": 4.0, "y": 5.0, "z": 6.0, "rotationRateX": 6.0, "rotationRateY": 12.0, "rotationRateZ": 18.0, "gravityX": 0.0, "gravityY": 0.0, "gravityZ": 9.8}
+      ],
+      "touchFrames": [
+        {"eventElapsedRealtimeNanos": 990000000, "receivedElapsedRealtimeNanos": 990500000, "x_norm": 0.2, "y_norm": 0.3, "pressure": 0.5, "size": 0.2, "touchMajor": 20.0, "touchMinor": 10.0, "orientation": 0.0, "pointerCount": 1, "viewWidthPx": 1000, "viewHeightPx": 2000, "axisAvailability": {"hasOrientationRange": true}},
+        {"eventElapsedRealtimeNanos": 1015000000, "receivedElapsedRealtimeNanos": 1018000000, "x_norm": 0.8, "y_norm": 0.7, "pressure": 0.6, "size": 0.3, "touchMajor": 30.0, "touchMinor": 15.0, "orientation": 0.2, "pointerCount": 1, "viewWidthPx": 1000, "viewHeightPx": 2000, "axisAvailability": {"hasOrientationRange": true}}
+      ]
+    }
+  }
+}

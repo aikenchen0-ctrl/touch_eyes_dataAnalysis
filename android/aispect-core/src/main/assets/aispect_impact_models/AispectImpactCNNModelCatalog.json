@@ -1,5 +1,77 @@
 [
   {
+    "displayName": "Full data Clean V2 old13 all 118",
+    "id": "full_data_clean_v2_old13_all_118",
+    "scalerResourceName": "AispectImpactCNNScaler_full_data_clean_v2_old13_all_118",
+    "weightsResourceName": "AispectImpactCNNWeights_full_data_clean_v2_old13_all_118"
+  },
+  {
+    "displayName": "Full old13 seen devices current preprocessed all 118",
+    "id": "full_old13_seen_devices_current_preprocessed_all_118",
+    "scalerResourceName": "AispectImpactCNNScaler_full_old13_seen_devices_current_preprocessed_all_118",
+    "weightsResourceName": "AispectImpactCNNWeights_full_old13_seen_devices_current_preprocessed_all_118"
+  },
+  {
+    "displayName": "Full old13 seen devices current preprocessed 120",
+    "id": "full_old13_seen_devices_current_preprocessed_120",
+    "scalerResourceName": "AispectImpactCNNScaler_full_old13_seen_devices_current_preprocessed_120",
+    "weightsResourceName": "AispectImpactCNNWeights_full_old13_seen_devices_current_preprocessed_120"
+  },
+  {
+    "displayName": "Full old13 seen devices 120",
+    "id": "full_old13_seen_devices_120",
+    "scalerResourceName": "AispectImpactCNNScaler_full_old13_seen_devices_120",
+    "weightsResourceName": "AispectImpactCNNWeights_full_old13_seen_devices_120"
+  },
+  {
+    "scalerResourceName": "AispectImpactCNNScaler_deduplicated_clean_v3_probe_patch21_domain_zhuo-oneplus-le2110",
+    "id": "deduplicated_clean_v3_probe_patch21_domain_zhuo-oneplus-le2110",
+    "displayName": "Clean V3 Patch21 holdout Zhuo LE2110",
+    "weightsResourceName": "AispectImpactCNNWeights_deduplicated_clean_v3_probe_patch21_domain_zhuo-oneplus-le2110"
+  },
+  {
+    "scalerResourceName": "AispectImpactCNNScaler_deduplicated_clean_v3_probe_patch21_domain_tao-oneplus-le2110",
+    "id": "deduplicated_clean_v3_probe_patch21_domain_tao-oneplus-le2110",
+    "displayName": "Clean V3 Patch21 holdout Tao LE2110",
+    "weightsResourceName": "AispectImpactCNNWeights_deduplicated_clean_v3_probe_patch21_domain_tao-oneplus-le2110"
+  },
+  {
+    "scalerResourceName": "AispectImpactCNNScaler_deduplicated_clean_v3_probe_patch21_domain_lemon-xiaomi-2308cpxd0c",
+    "id": "deduplicated_clean_v3_probe_patch21_domain_lemon-xiaomi-2308cpxd0c",
+    "displayName": "Clean V3 Patch21 holdout Lemon Xiaomi",
+    "weightsResourceName": "AispectImpactCNNWeights_deduplicated_clean_v3_probe_patch21_domain_lemon-xiaomi-2308cpxd0c"
+  },
+  {
+    "scalerResourceName": "AispectImpactCNNScaler_deduplicated_clean_v3_probe_patch21_domain_tao-oneplus-phk110",
+    "id": "deduplicated_clean_v3_probe_patch21_domain_tao-oneplus-phk110",
+    "displayName": "Clean V3 Patch21 holdout Tao PHK110",
+    "weightsResourceName": "AispectImpactCNNWeights_deduplicated_clean_v3_probe_patch21_domain_tao-oneplus-phk110"
+  },
+  {
+    "scalerResourceName": "AispectImpactCNNScaler_deduplicated_clean_v3_probe_patch21_domain_zhuo-oneplus-phk110",
+    "id": "deduplicated_clean_v3_probe_patch21_domain_zhuo-oneplus-phk110",
+    "displayName": "Clean V3 Patch21 holdout Zhuo PHK110",
+    "weightsResourceName": "AispectImpactCNNWeights_deduplicated_clean_v3_probe_patch21_domain_zhuo-oneplus-phk110"
+  },
+  {
+    "displayName": "Experimental touch23 all-data fit only",
+    "id": "time_grid_all_data_touch23_experimental",
+    "scalerResourceName": "AispectTimeGridGroupNormScaler_time_grid_all_data_touch23_experimental",
+    "weightsResourceName": "AispectTimeGridGroupNormWeights_time_grid_all_data_touch23_experimental"
+  },
+  {
+    "displayName": "Experimental no gravity all-data fit only",
+    "id": "time_grid_all_data_no_gravity_experimental",
+    "scalerResourceName": "AispectTimeGridGroupNormScaler_time_grid_all_data_no_gravity_experimental",
+    "weightsResourceName": "AispectTimeGridGroupNormWeights_time_grid_all_data_no_gravity_experimental"
+  },
+  {
+    "displayName": "Experimental delta gravity all-data fit only",
+    "id": "time_grid_all_data_delta_gravity_experimental",
+    "scalerResourceName": "AispectTimeGridGroupNormScaler_time_grid_all_data_delta_gravity_experimental",
+    "weightsResourceName": "AispectTimeGridGroupNormWeights_time_grid_all_data_delta_gravity_experimental"
+  },
+  {
     "displayName": "OnePlus 4-class recollect nearfull weighted old13 multichannel",
     "id": "oneplus_four_class_after_recollect_hard_nearfull_weighted_old13_multichannel",
     "scalerResourceName": "AispectImpactCNNScaler_oneplus_four_class_after_recollect_hard_nearfull_weighted_old13_multichannel",

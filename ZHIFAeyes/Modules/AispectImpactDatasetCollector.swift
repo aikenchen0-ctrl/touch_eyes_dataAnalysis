@@ -80,17 +80,17 @@ struct AispectImpactSystemActivityEvidence: Codable, Equatable {
 
 final class AispectImpactDatasetCollector {
     struct Config {
-        // 中文注释：训练窗口前置帧数量。
-        var preFrames: Int = 5
-        // 中文注释：训练窗口后置帧数量。
+        // 中文注释：按下锚点原始窗口在按下前保留的真实帧数量。
+        var preFrames: Int = 15
+        // 中文注释：按下锚点原始窗口在抬起后保留的真实帧数量。
         var postFrames: Int = 15
         // 中文注释：滚动缓存长度，便于保留前置样本。
-        var rollingFrameLimit: Int = 240
+        var rollingFrameLimit: Int = 600
         // 中文注释：采集任务默认目标样本数。
         var targetAcceptedSamples: Int = 30
         // 中文注释：数据文件写入目录名称。
         var datasetDirectoryName: String = "AispectImpactDataset"
-        // 中文注释：缺失采样补零时使用的兜底采样率。
+        // 中文注释：计算抬起后等待时长时使用的兜底采样率。
         var fallbackSampleRate: Double = 120
     }
 
@@ -131,13 +131,23 @@ final class AispectImpactDatasetCollector {
     private struct SampleFrameRecord: Codable {
         let frameIndex: Int
         let relativeTimestamp: Double
-        let delta: Double
+        let timeSinceTouchDown: Double
+        let timeSinceAnchor: Double
         let x: Double
         let y: Double
         let z: Double
+        let x_norm: Double
+        let y_norm: Double
+        let rotationRateX: Double
+        let rotationRateY: Double
+        let rotationRateZ: Double
+        let gravityX: Double
+        let gravityY: Double
+        let gravityZ: Double
     }
 
     private struct SampleRecord: Codable {
+        let schemaVersion: Int
         let id: String
         let createdAt: Double
         let collectionSessionID: String
@@ -149,7 +159,15 @@ final class AispectImpactDatasetCollector {
         let sampleRateHz: Double
         let referenceFrameIndex: Int
         let anchorTimestamp: Double
-        let maxAbsDelta: Double
+        let downAnchorTimestamp: Double
+        let liftAnchorTimestamp: Double
+        let downReferenceFrameIndex: Int
+        let liftReferenceFrameIndex: Int
+        let startFrameIndex: Int
+        let endFrameIndex: Int
+        let preDownFrameCount: Int
+        let postLiftFrameCount: Int
+        let windowComplete: Bool
         let activityEvidence: AispectImpactSystemActivityEvidence?
         let appVersion: String
         let appBuild: String
@@ -215,6 +233,7 @@ final class AispectImpactDatasetCollector {
             } else {
                 acceptedCount = 0
                 rejectedCount = 0
+                rollingFrames.removeAll()
                 collectionSessionID = UUID().uuidString
                 collectionSessionStartedAt = Date().timeIntervalSince1970
                 lastEventKey = "collector_session_ready"
@@ -256,7 +275,7 @@ final class AispectImpactDatasetCollector {
                 endedLiftOffset: nil,
                 lastSampleRateHz: config.fallbackSampleRate
             )
-            lastEventKey = "collector_waiting_for_touch_end"
+            lastEventKey = "collector_down_window_waiting"
             lastEventDetail = selectedLabel.datasetKey
         }
         emitStatus()
@@ -282,7 +301,7 @@ final class AispectImpactDatasetCollector {
                 session.remainingPostFrames = next
                 activeSession = session
                 if next <= 0 {
-                    finalizeCaptureLocked(paddingMissingPostFramesWithZeros: false)
+                    finalizeCaptureLocked()
                     shouldEmitStatus = true
                 }
             } else {
@@ -292,6 +311,15 @@ final class AispectImpactDatasetCollector {
         if shouldEmitStatus {
             emitStatus()
         }
+    }
+
+    func markDownWindowReady() {
+        stateQueue.sync {
+            guard activeSession != nil else { return }
+            lastEventKey = "collector_down_window_ready_model_pending"
+            lastEventDetail = selectedLabel.datasetKey
+        }
+        emitStatus()
     }
 
     func acceptCapture(anchorTimestamp: TimeInterval, touchKind: String, liftOffset: Double?) -> TimeInterval {
@@ -327,7 +355,7 @@ final class AispectImpactDatasetCollector {
         var shouldEmitStatus = false
         stateQueue.sync {
             guard activeSession != nil else { return }
-            finalizeCaptureLocked(paddingMissingPostFramesWithZeros: true)
+            finalizeCaptureLocked()
             shouldEmitStatus = true
         }
         if shouldEmitStatus {
@@ -335,7 +363,7 @@ final class AispectImpactDatasetCollector {
         }
     }
 
-    private func finalizeCaptureLocked(paddingMissingPostFramesWithZeros: Bool) {
+    private func finalizeCaptureLocked() {
         guard var session = activeSession else { return }
         activeSession = nil
 
@@ -346,21 +374,6 @@ final class AispectImpactDatasetCollector {
             return
         }
 
-        if paddingMissingPostFramesWithZeros, let remaining = session.remainingPostFrames, remaining > 0 {
-            let paddingRate = max(session.lastSampleRateHz, config.fallbackSampleRate)
-            let step = 1.0 / paddingRate
-            let baseTimestamp = session.recordedFrames.last?.timestamp ?? session.startedAt
-            for offset in 0..<remaining {
-                let timestamp = baseTimestamp + step * Double(offset + 1)
-                session.recordedFrames.append(
-                    CapturedFrame(
-                        timestamp: timestamp,
-                        frame: AispectImpactFrame(delta: 0, x: 0, y: 0, z: 0)
-                    )
-                )
-            }
-        }
-
         let allFrames = session.preFrames + session.recordedFrames
         guard !allFrames.isEmpty else {
             rejectedCount += 1
@@ -369,40 +382,52 @@ final class AispectImpactDatasetCollector {
             return
         }
 
-        let referenceIndex = nearestFrameIndex(for: anchorTimestamp, in: allFrames)
+        let downReferenceSourceIndex = nearestFrameIndex(for: session.startedAt, in: allFrames)
+        let liftReferenceSourceIndex = nearestFrameIndex(for: anchorTimestamp, in: allFrames)
+        guard liftReferenceSourceIndex >= downReferenceSourceIndex else {
+            rejectedCount += 1
+            lastEventKey = "collector_event_invalid_anchor_order"
+            lastEventDetail = nil
+            return
+        }
+
+        let startSourceIndex = max(0, downReferenceSourceIndex - config.preFrames)
+        let endSourceIndex = min(allFrames.count - 1, liftReferenceSourceIndex + config.postFrames)
         let sampleRate = max(session.lastSampleRateHz, config.fallbackSampleRate)
-        let referenceTimestamp = allFrames[referenceIndex].timestamp
+        let downReferenceTimestamp = allFrames[downReferenceSourceIndex].timestamp
+        let downReferenceFrameIndex = 0
+        let liftReferenceFrameIndex = liftReferenceSourceIndex - downReferenceSourceIndex
+        let startFrameIndex = startSourceIndex - downReferenceSourceIndex
+        let endFrameIndex = endSourceIndex - downReferenceSourceIndex
+        let windowComplete = startSourceIndex == downReferenceSourceIndex - config.preFrames
+            && endSourceIndex == liftReferenceSourceIndex + config.postFrames
         var frameRecords: [SampleFrameRecord] = []
 
-        for offset in -config.preFrames...config.postFrames {
-            let absoluteIndex = referenceIndex + offset
-            if absoluteIndex >= 0, absoluteIndex < allFrames.count {
-                let source = allFrames[absoluteIndex]
-                frameRecords.append(
-                    SampleFrameRecord(
-                        frameIndex: offset,
-                        relativeTimestamp: source.timestamp - referenceTimestamp,
-                        delta: source.frame.delta,
-                        x: source.frame.x,
-                        y: source.frame.y,
-                        z: source.frame.z
-                    )
+        for absoluteIndex in startSourceIndex...endSourceIndex {
+            let source = allFrames[absoluteIndex]
+            frameRecords.append(
+                SampleFrameRecord(
+                    frameIndex: absoluteIndex - downReferenceSourceIndex,
+                    relativeTimestamp: source.timestamp - downReferenceTimestamp,
+                    timeSinceTouchDown: source.timestamp - session.startedAt,
+                    timeSinceAnchor: source.timestamp - anchorTimestamp,
+                    x: source.frame.x,
+                    y: source.frame.y,
+                    z: source.frame.z,
+                    x_norm: source.frame.xNorm,
+                    y_norm: source.frame.yNorm,
+                    rotationRateX: source.frame.rotationRateX,
+                    rotationRateY: source.frame.rotationRateY,
+                    rotationRateZ: source.frame.rotationRateZ,
+                    gravityX: source.frame.gravityX,
+                    gravityY: source.frame.gravityY,
+                    gravityZ: source.frame.gravityZ
                 )
-            } else {
-                frameRecords.append(
-                    SampleFrameRecord(
-                        frameIndex: offset,
-                        relativeTimestamp: Double(offset) / sampleRate,
-                        delta: 0,
-                        x: 0,
-                        y: 0,
-                        z: 0
-                    )
-                )
-            }
+            )
         }
 
         let record = SampleRecord(
+            schemaVersion: 5,
             id: session.id,
             createdAt: Date().timeIntervalSince1970,
             collectionSessionID: collectionSessionID ?? "unknown",
@@ -412,9 +437,17 @@ final class AispectImpactDatasetCollector {
             sourceTouchKind: session.endedTouchKind ?? "unknown",
             liftOffset: session.endedLiftOffset,
             sampleRateHz: sampleRate,
-            referenceFrameIndex: referenceIndex,
-            anchorTimestamp: anchorTimestamp,
-            maxAbsDelta: allFrames.map { abs($0.frame.delta) }.max() ?? 0,
+            referenceFrameIndex: downReferenceFrameIndex,
+            anchorTimestamp: session.startedAt,
+            downAnchorTimestamp: session.startedAt,
+            liftAnchorTimestamp: anchorTimestamp,
+            downReferenceFrameIndex: downReferenceFrameIndex,
+            liftReferenceFrameIndex: liftReferenceFrameIndex,
+            startFrameIndex: startFrameIndex,
+            endFrameIndex: endFrameIndex,
+            preDownFrameCount: max(0, -startFrameIndex),
+            postLiftFrameCount: max(0, endFrameIndex - liftReferenceFrameIndex),
+            windowComplete: windowComplete,
             activityEvidence: latestActivity,
             appVersion: bundleShortVersion,
             appBuild: bundleBuildVersion,

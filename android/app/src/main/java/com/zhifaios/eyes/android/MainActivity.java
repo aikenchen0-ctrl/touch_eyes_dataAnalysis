@@ -22,12 +22,14 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.text.InputType;
 
 import com.zhifaios.eyes.aispect.AispectCollectionController;
 import com.zhifaios.eyes.aispect.AispectContactEncodingProfile;
@@ -78,10 +80,12 @@ public final class MainActivity extends Activity implements AispectCollectionCon
     private SeekBar thresholdSeekBar;
     private TextView rateText;
     private TextView impactLogText;
+    private TextView firstTouchModelText;
     private TextView modelNameText;
     private TextView modelDetailText;
     private TextView normalizationDetailText;
     private TextView collectorGuideText;
+    private EditText collectorUserNameInput;
     private TextView collectorStatusText;
     private TextView latestRawSampleText;
     private TextView resultText;
@@ -118,7 +122,8 @@ public final class MainActivity extends Activity implements AispectCollectionCon
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         controller = new AispectCollectionController(this);
-        controller.config().enableCnnDiagnostics = true;
+        controller.setSelectedModelId(BuildConfig.DEFAULT_MODEL_ID);
+        controller.config().enableCnnDiagnostics = false;
         controller.interactionEngine().config().minimumSampleIntervalMs = 4L;
         controller.interactionEngine().config().dragActivationRadiusPx = dp(28);
         controller.interactionEngine().config().heavyLiftOffsetThresholdPx = dp(4);
@@ -134,6 +139,7 @@ public final class MainActivity extends Activity implements AispectCollectionCon
     @Override
     protected void onDestroy() {
         controller.setEnabled(false);
+        controller.shutdown();
         super.onDestroy();
     }
 
@@ -279,6 +285,7 @@ public final class MainActivity extends Activity implements AispectCollectionCon
         addWithTopMargin(content, thresholdText, dp(8), ViewGroup.LayoutParams.WRAP_CONTENT);
 
         thresholdSeekBar = new SeekBar(this);
+        thresholdSeekBar.setEnabled(false);
         thresholdSeekBar.setMax(950);
         thresholdSeekBar.setProgress(200);
         thresholdSeekBar.setPadding(0, 0, 0, 0);
@@ -303,6 +310,16 @@ public final class MainActivity extends Activity implements AispectCollectionCon
         copyLogButton = panelButton(getString(R.string.impact_copy_log), 10f);
         addWithTopMargin(content, copyLogButton, dp(6), dp(26));
         copyLogButton.setVisibility(View.GONE);
+
+        TextView firstTouchModelTitle = sectionTitle(R.string.first_touch_model_title, 11f);
+        addWithTopMargin(content, firstTouchModelTitle, dp(10), ViewGroup.LayoutParams.WRAP_CONTENT);
+
+        firstTouchModelText = monospaceText(9f, COLOR_ACCENT);
+        firstTouchModelText.setText(getString(
+                R.string.first_touch_model_default_format,
+                controller.firstTouchModelId()
+        ));
+        addWithTopMargin(content, firstTouchModelText, dp(5), ViewGroup.LayoutParams.WRAP_CONTENT);
 
         TextView modelTitle = sectionTitle(R.string.impact_model_title, 11f);
         addWithTopMargin(content, modelTitle, dp(10), ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -349,6 +366,17 @@ public final class MainActivity extends Activity implements AispectCollectionCon
 
         TextView collectorTitle = sectionTitle(R.string.collector_title, 11f);
         addWithTopMargin(content, collectorTitle, dp(10), ViewGroup.LayoutParams.WRAP_CONTENT);
+
+        collectorUserNameInput = new EditText(this);
+        collectorUserNameInput.setSingleLine(true);
+        collectorUserNameInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        collectorUserNameInput.setHint(R.string.collector_user_name_hint);
+        collectorUserNameInput.setTextColor(COLOR_TEXT);
+        collectorUserNameInput.setHintTextColor(COLOR_DIM);
+        collectorUserNameInput.setTextSize(10f);
+        collectorUserNameInput.setPadding(dp(8), 0, dp(8), 0);
+        collectorUserNameInput.setBackground(panelBackground(COLOR_PANEL_BUTTON, dp(7), Color.argb(60, 255, 255, 255)));
+        addWithTopMargin(content, collectorUserNameInput, dp(6), dp(34));
 
         collectorSwitchRow = new LinearLayout(this);
         collectorSwitchRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -445,12 +473,12 @@ public final class MainActivity extends Activity implements AispectCollectionCon
         nextModelButton.setOnClickListener(v -> stepModel(1));
         collectorSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (!isUpdatingSwitch) {
-                controller.setEnabled(isChecked);
+                setCollectionEnabled(isChecked);
             }
         });
         collectorSwitchRow.setOnClickListener(v -> {
             boolean nextEnabled = !controller.isEnabled();
-            controller.setEnabled(nextEnabled);
+            setCollectionEnabled(nextEnabled);
         });
         thresholdSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
@@ -634,7 +662,7 @@ public final class MainActivity extends Activity implements AispectCollectionCon
         boolean locked = status.isLabelLocked;
         syncCollectorSwitch(status.enabled);
         collectorGuideText.setText(locked ? R.string.collector_guide_locked : R.string.collector_guide_text);
-        collectorStatusText.setText(collectionStatus(status));
+        collectorStatusText.setText(collectionStatusWithUser(status));
         impactLogText.setText(impactLog(status));
         normalizationDetailText.setText(normalizationText(status));
         updateThresholdText();
@@ -705,6 +733,13 @@ public final class MainActivity extends Activity implements AispectCollectionCon
         );
     }
 
+    private String collectionStatusWithUser(AispectCollectionController.Status status) {
+        String userName = controller == null ? "" : controller.collectorUserName();
+        return getString(R.string.collector_user_name_status, userName.isEmpty() ? "--" : userName)
+                + "\n"
+                + collectionStatus(status);
+    }
+
     private String normalizationText(AispectCollectionController.Status status) {
         AispectContactEncodingProfile profile = status.latestContactEncodingProfile;
         if (profile == null) {
@@ -747,7 +782,6 @@ public final class MainActivity extends Activity implements AispectCollectionCon
                 touchFrames == null ? 0 : touchFrames.length(),
                 motionFrames == null ? 0 : motionFrames.length(),
                 json.optDouble("sampleRateHz", 0.0),
-                json.optDouble("maxAbsDelta", 0.0),
                 lastTouch == null ? 0.0 : lastTouch.optDouble("touchMajor", 0.0),
                 lastTouch == null ? 0.0 : lastTouch.optDouble("touchMinor", 0.0),
                 lastTouch == null ? 0.0 : lastTouch.optDouble("pressure", 0.0),
@@ -784,9 +818,26 @@ public final class MainActivity extends Activity implements AispectCollectionCon
         isUpdatingSwitch = false;
     }
 
+    private void setCollectionEnabled(boolean enabled) {
+        if (enabled) {
+            String userName = collectorUserNameInput == null ? "" : collectorUserNameInput.getText().toString();
+            controller.setCollectorUserName(userName);
+            if (!controller.canStartCollection()) {
+                if (collectorUserNameInput != null) {
+                    collectorUserNameInput.setError(getString(R.string.collector_user_name_required));
+                    collectorUserNameInput.requestFocus();
+                }
+                syncCollectorSwitch(false);
+                return;
+            }
+        }
+        controller.setEnabled(enabled);
+        syncCollectorSwitch(controller.isEnabled());
+    }
+
     private void updateThresholdText() {
         if (thresholdText != null) {
-            thresholdText.setText(getString(R.string.impact_threshold_format, impactThreshold));
+            thresholdText.setText(R.string.impact_threshold_format);
         }
     }
 
@@ -887,11 +938,17 @@ public final class MainActivity extends Activity implements AispectCollectionCon
         if ("collector_waiting_for_touch_end".equals(key)) {
             return getString(R.string.collector_waiting_for_touch_end);
         }
-        if ("collector_diagnostic_waiting".equals(key)) {
-            return getString(R.string.collector_diagnostic_waiting);
+        if ("collector_down_window_waiting".equals(key)) {
+            return getString(R.string.collector_down_window_waiting);
         }
-        if ("collector_diagnostic_ready".equals(key)) {
-            return getString(R.string.collector_diagnostic_ready);
+        if ("collector_diagnostic_down_window_waiting".equals(key)) {
+            return getString(R.string.collector_diagnostic_down_window_waiting);
+        }
+        if ("collector_down_window_ready_model_pending".equals(key)) {
+            return getString(R.string.collector_down_window_ready_model_pending);
+        }
+        if ("collector_diagnostic_ready_model_pending".equals(key)) {
+            return getString(R.string.collector_diagnostic_ready_model_pending);
         }
         if ("collector_collecting_postroll".equals(key)) {
             return getString(R.string.collector_collecting_postroll);
@@ -906,6 +963,9 @@ public final class MainActivity extends Activity implements AispectCollectionCon
     }
 
     private void styleSegmentButtons(boolean locked) {
+        if (collectorUserNameInput != null) {
+            collectorUserNameInput.setEnabled(!locked);
+        }
         styleButton(lightButton, selectedStrength == AispectModels.TouchStrength.LIGHT, locked);
         styleButton(heavyButton, selectedStrength == AispectModels.TouchStrength.HEAVY, locked);
         styleButton(thumbButton, selectedFingerType == AispectModels.FingerType.THUMB, locked);
@@ -927,7 +987,7 @@ public final class MainActivity extends Activity implements AispectCollectionCon
         if (clipboard != null) {
             clipboard.setPrimaryClip(ClipData.newPlainText("datasetPath", status.datasetDirectoryPath));
         }
-        collectorStatusText.setText(collectionStatus(status));
+        collectorStatusText.setText(collectionStatusWithUser(status));
     }
 
     private void copyImpactLog() {
@@ -1040,7 +1100,7 @@ public final class MainActivity extends Activity implements AispectCollectionCon
     }
 
     private static boolean isCompletedPredictionEvent(String key) {
-        return "collector_diagnostic_ready".equals(key) || "collector_event_saved".equals(key);
+        return "collector_event_saved".equals(key);
     }
 
     private void updateFourClassRecallBox(AispectCollectionController.Status status) {

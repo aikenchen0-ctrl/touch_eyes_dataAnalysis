@@ -2,6 +2,8 @@ package com.zhifaios.eyes.aispect;
 
 import android.content.Context;
 import android.os.Environment;
+import android.view.Display;
+import android.view.WindowManager;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -15,6 +17,8 @@ import java.util.List;
 import java.util.Locale;
 
 public final class AispectDataLogger {
+    static final int RAW_SCHEMA_VERSION = 6;
+
     public static final class Config {
         public String datasetDirectoryName = "AispectAndroidDataset";
         public String appVersion = "unknown";
@@ -55,8 +59,13 @@ public final class AispectDataLogger {
             long createdAtMillis,
             String collectionSessionId,
             long collectionSessionStartedAtMillis,
+            long downEventElapsedRealtimeNanos,
+            long downReceivedElapsedRealtimeNanos,
+            long liftEventElapsedRealtimeNanos,
+            long liftReceivedElapsedRealtimeNanos,
             String recordStatus,
             String rejectionReason,
+            AispectModels.CollectorIdentity collectorIdentity,
             AispectModels.DatasetLabel label,
             String sourceTouchKind,
             Float liftOffset,
@@ -71,7 +80,7 @@ public final class AispectDataLogger {
             AispectImpactSignalCollector.Snapshot signalSnapshot
     ) throws IOException, JSONException {
         JSONObject record = new JSONObject();
-        record.put("schemaVersion", 2);
+        record.put("schemaVersion", RAW_SCHEMA_VERSION);
         record.put("platform", "android");
         record.put("id", id);
         record.put("createdAt", createdAtMillis / 1000.0);
@@ -81,19 +90,37 @@ public final class AispectDataLogger {
         if (rejectionReason != null && !rejectionReason.isEmpty()) {
             record.put("rejectionReason", rejectionReason);
         }
+        record.put("collector", collectorIdentity.toJson());
         record.put("label", label.toJson());
         record.put("manualLabelSource", "user_selected");
         record.put("sourceTouchKind", sourceTouchKind);
+        record.put("timeAlignment", timeAlignmentToJson(
+                downEventElapsedRealtimeNanos,
+                downReceivedElapsedRealtimeNanos,
+                liftEventElapsedRealtimeNanos,
+                liftReceivedElapsedRealtimeNanos
+        ));
         if (liftOffset != null) {
             record.put("liftOffset", liftOffset);
         }
         record.put("sampleRateHz", impactWindow.sampleRateHz);
-        record.put("referenceFrameIndex", 0);
-        record.put("anchorTimestamp", impactWindow.anchorTimestampSeconds);
-        record.put("maxAbsDelta", impactWindow.maxAbsDelta);
+        record.put("referenceFrameIndex", impactWindow.downReferenceFrameIndex);
+        record.put("anchorTimestamp", impactWindow.downAnchorTimestampSeconds);
+        record.put("downAnchorTimestamp", impactWindow.downAnchorTimestampSeconds);
+        record.put("liftAnchorTimestamp", impactWindow.liftAnchorTimestampSeconds);
+        record.put("downReferenceFrameIndex", impactWindow.downReferenceFrameIndex);
+        record.put("liftReferenceFrameIndex", impactWindow.liftReferenceFrameIndex);
+        record.put("startFrameIndex", impactWindow.firstFrameIndex);
+        record.put("endFrameIndex", impactWindow.lastFrameIndex);
+        record.put("preDownFrameCount", Math.max(0, -impactWindow.firstFrameIndex));
+        record.put("postLiftFrameCount", Math.max(0, impactWindow.lastFrameIndex - impactWindow.liftReferenceFrameIndex));
+        record.put("windowComplete", impactWindow.windowComplete);
+        record.put("captureWindow", captureWindowToJson(impactWindow));
         record.put("appVersion", config.appVersion);
         record.put("appBuild", config.appBuild);
         record.put("deviceCapability", capability.toJson());
+        record.put("sensorMetadata", sensorMetadataToJson(signalSnapshot));
+        record.put("touchMetadata", touchMetadataToJson(displayRotation()));
         record.put("contactPatch", contactPatch.toJson());
         if (contactEncodingProfile != null) {
             record.put("contactEncoding", contactEncodingProfile.toJson());
@@ -121,13 +148,142 @@ public final class AispectDataLogger {
         return new SavedRecord(destination, record);
     }
 
+    static JSONObject captureWindowToJson(AispectSignalWindowBuilder.Window window) throws JSONException {
+        JSONObject json = new JSONObject();
+        boolean dualAnchor = AispectSignalWindowBuilder.DUAL_ANCHOR_CAPTURE_CONTRACT
+                .equals(window.captureWindowContract);
+        int requiredPreDownFrameCount = dualAnchor
+                ? window.requiredPreDownFrameCount
+                : 0;
+        int requiredPostLiftFrameCount = dualAnchor
+                ? window.requiredPostLiftFrameCount
+                : 0;
+        double requiredPreDownDurationMs = dualAnchor
+                ? window.requiredPreDownDurationSeconds * 1000.0
+                : 0.0;
+        double requiredPostLiftDurationMs = dualAnchor
+                ? window.requiredPostLiftDurationSeconds * 1000.0
+                : 0.0;
+        int preFrameCount = Math.max(0, -window.firstFrameIndex);
+        int postFrameCount = Math.max(0, window.lastFrameIndex - window.liftReferenceFrameIndex);
+        boolean preDownFrameComplete = !dualAnchor || preFrameCount >= requiredPreDownFrameCount;
+        boolean postLiftFrameComplete = !dualAnchor || postFrameCount >= requiredPostLiftFrameCount;
+        boolean preDownDurationComplete = !dualAnchor
+                || window.actualPreDownDurationSeconds * 1000.0 + 1e-6 >= requiredPreDownDurationMs;
+        boolean postLiftDurationComplete = !dualAnchor
+                || window.actualPostLiftDurationSeconds * 1000.0 + 1e-6 >= requiredPostLiftDurationMs;
+        json.put("schemaVersion", 1);
+        json.put("contract", window.captureWindowContract);
+        json.put("requiredPreDownDurationMs", requiredPreDownDurationMs);
+        json.put("requiredPostLiftDurationMs", requiredPostLiftDurationMs);
+        json.put("requiredPreDownFrameCount", requiredPreDownFrameCount);
+        json.put("requiredPostLiftFrameCount", requiredPostLiftFrameCount);
+        json.put("actualPreDownFrameCount", preFrameCount);
+        json.put("actualPostLiftFrameCount", postFrameCount);
+        json.put("actualPreDownDurationMs", window.actualPreDownDurationSeconds * 1000.0);
+        json.put("actualPostLiftDurationMs", window.actualPostLiftDurationSeconds * 1000.0);
+        json.put("preDownDurationComplete", preDownDurationComplete);
+        json.put("postLiftDurationComplete", postLiftDurationComplete);
+        json.put("preDownFrameCountComplete", preDownFrameComplete);
+        json.put("postLiftFrameCountComplete", postLiftFrameComplete);
+        json.put("preDownComplete", window.preDownComplete);
+        json.put("postLiftComplete", window.postLiftComplete);
+        json.put("windowComplete", window.windowComplete);
+        return json;
+    }
+
     private static JSONObject motionSignalToJson(AispectImpactSignalCollector.Snapshot snapshot) throws JSONException {
         JSONObject json = new JSONObject();
         json.put("frameCount", snapshot.frames.size());
         json.put("sampleRateHz", snapshot.sampleRateHz);
         json.put("accelerationSensorName", snapshot.accelerationSensorName);
+        json.put("accelerationSensorSource", snapshot.accelerationSensorSource);
         json.put("hasGyroscope", snapshot.hasGyroscope);
         json.put("hasGravity", snapshot.hasGravity);
+        return json;
+    }
+
+    static JSONObject sensorMetadataToJson(AispectImpactSignalCollector.Snapshot snapshot) throws JSONException {
+        JSONObject json = new JSONObject();
+        json.put("platform", "android");
+        json.put("sensorSource", snapshot.accelerationSensorSource);
+        json.put("accelerationUnit", "m/s^2");
+        json.put("rotationRateUnit", "rad/s");
+        json.put("sensorAxisFrame", "canonical_device");
+        json.put("axisTransformMatrix", identityAxisTransformMatrix());
+        json.put("transformVersion", "cross_device_v1");
+        json.put("gravityAvailable", snapshot.hasGravity);
+        return json;
+    }
+
+    static JSONObject touchMetadataToJson() throws JSONException {
+        return touchMetadataToJson(0);
+    }
+
+    static JSONObject touchMetadataToJson(int displayRotation) throws JSONException {
+        JSONObject json = new JSONObject();
+        json.put("touchUnit", "pixels");
+        json.put("touchTransformVersion", "cross_device_v1");
+        json.put("touchCoordinateFrame", "android_view");
+        json.put("displayRotation", displayRotation);
+        json.put("touchCoordinateTransformMatrix", touchCoordinateTransformMatrix(displayRotation));
+        return json;
+    }
+
+    private int displayRotation() {
+        WindowManager manager = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        Display display = manager == null ? null : manager.getDefaultDisplay();
+        return display == null ? 0 : display.getRotation();
+    }
+
+    private static JSONArray touchCoordinateTransformMatrix(int displayRotation) {
+        JSONArray matrix = new JSONArray();
+        switch (displayRotation) {
+            case 1:
+                matrix.put(new JSONArray().put(0).put(1).put(0));
+                matrix.put(new JSONArray().put(-1).put(0).put(1));
+                break;
+            case 2:
+                matrix.put(new JSONArray().put(-1).put(0).put(1));
+                matrix.put(new JSONArray().put(0).put(-1).put(1));
+                break;
+            case 3:
+                matrix.put(new JSONArray().put(0).put(-1).put(1));
+                matrix.put(new JSONArray().put(1).put(0).put(0));
+                break;
+            default:
+                matrix.put(new JSONArray().put(1).put(0).put(0));
+                matrix.put(new JSONArray().put(0).put(1).put(0));
+                break;
+        }
+        return matrix;
+    }
+
+    private static JSONArray identityAxisTransformMatrix() {
+        JSONArray matrix = new JSONArray();
+        matrix.put(new JSONArray().put(1).put(0).put(0));
+        matrix.put(new JSONArray().put(0).put(1).put(0));
+        matrix.put(new JSONArray().put(0).put(0).put(1));
+        return matrix;
+    }
+
+    static JSONObject timeAlignmentToJson(
+            long downEventElapsedRealtimeNanos,
+            long downReceivedElapsedRealtimeNanos,
+            long liftEventElapsedRealtimeNanos,
+            long liftReceivedElapsedRealtimeNanos
+    ) throws JSONException {
+        JSONObject json = new JSONObject();
+        json.put("schemaVersion", 1);
+        json.put("clock", "elapsedRealtimeNanos");
+        json.put("imuEventTimestampSource", "SensorEvent.timestamp");
+        json.put("touchEventTimestampSource", "MotionEvent.eventTime");
+        json.put("touchTimestampConversion", "uptimeMillis_to_elapsedRealtimeNanos_at_callback");
+        json.put("availabilityRule", "touchReceivedElapsedRealtimeNanos<=imuReceivedElapsedRealtimeNanos");
+        json.put("downEventElapsedRealtimeNanos", downEventElapsedRealtimeNanos);
+        json.put("downReceivedElapsedRealtimeNanos", downReceivedElapsedRealtimeNanos);
+        json.put("liftEventElapsedRealtimeNanos", liftEventElapsedRealtimeNanos);
+        json.put("liftReceivedElapsedRealtimeNanos", liftReceivedElapsedRealtimeNanos);
         return json;
     }
 

@@ -1,5 +1,7 @@
 package com.zhifaios.eyes.aispect;
 
+import com.zhifaios.eyes.aispect.legacy.AispectLegacyFeatureBuilder;
+
 import android.content.Context;
 import android.content.res.AssetManager;
 
@@ -12,6 +14,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -23,11 +26,9 @@ public final class AispectImpactCNNClassifier {
     private static final String MODEL_G4 = "g4_pre5_post15";
     private static final String MODEL_G13 = "g13_time_f14_pre4_post9";
     private static final String MODEL_ANDROID_TOP_WINDOW = "android_patch21_no_confidence_pre5_post9";
+    private static final String MODEL_LEMON_TAO_BEST = "lemon_tao_full4_enhanced_patch21_no_confidence";
     private static final String MODEL_FINGER_FOUR_CLASS_TOP = "oneplus_four_class_after_recollect_hard_nearfull_weighted_old13_multichannel";
     private static final double EPSILON = 1e-5;
-    private static final int CONTACT_MAP_SIZE = 9;
-    private static final double CONTACT_GRID_RADIUS_PX = 48.0;
-    private static final double CONTACT_DEFAULT_SIGMA_PX = 12.0;
 
     public static final class ModelInfo {
         public final String id;
@@ -40,6 +41,7 @@ public final class AispectImpactCNNClassifier {
         public final String[] featureNames;
         public final int classCount;
         public final String[] labelOrder;
+        public final String featureContract;
 
         ModelInfo(
                 String id,
@@ -51,7 +53,8 @@ public final class AispectImpactCNNClassifier {
                 int[] frameIndices,
                 String[] featureNames,
                 int classCount,
-                String[] labelOrder
+                String[] labelOrder,
+                String featureContract
         ) {
             this.id = id;
             this.displayName = displayName;
@@ -63,16 +66,27 @@ public final class AispectImpactCNNClassifier {
             this.featureNames = featureNames.clone();
             this.classCount = classCount;
             this.labelOrder = labelOrder.clone();
+            this.featureContract = featureContract == null ? "" : featureContract;
         }
     }
 
     private final Context context;
     private final Map<String, Model> modelCache = new HashMap<>();
     private final Map<String, Boolean> modelLoadAttempts = new HashMap<>();
+    private final Map<String, AispectTimeGridGroupNormRuntime> timeGridRuntimeCache = new HashMap<>();
+    private final Map<String, Boolean> timeGridRuntimeLoadAttempts = new HashMap<>();
     private List<ModelInfo> catalogModels;
 
     public AispectImpactCNNClassifier(Context context) {
         this.context = context.getApplicationContext();
+    }
+
+    public static boolean usesCausalPressFeatureContract(String featureContract) {
+        return AispectCausalPressFeatureBuilder.isCausalFeatureContract(featureContract);
+    }
+
+    public static boolean usesLegacyFeatureContract(String featureContract) {
+        return !usesCausalPressFeatureContract(featureContract);
     }
 
     public List<ModelInfo> availableModels() {
@@ -80,9 +94,13 @@ public final class AispectImpactCNNClassifier {
     }
 
     public ModelInfo defaultModelInfo() {
-        ModelInfo fingerFourClass = modelInfoForId(MODEL_FINGER_FOUR_CLASS_TOP);
-        if (fingerFourClass != null) {
-            return fingerFourClass;
+        ModelInfo onePlusBest = modelInfoForId(MODEL_FINGER_FOUR_CLASS_TOP);
+        if (onePlusBest != null) {
+            return onePlusBest;
+        }
+        ModelInfo lemonTaoBest = modelInfoForId(MODEL_LEMON_TAO_BEST);
+        if (lemonTaoBest != null) {
+            return lemonTaoBest;
         }
         ModelInfo androidTopWindow = modelInfoForId(MODEL_ANDROID_TOP_WINDOW);
         if (androidTopWindow != null) {
@@ -160,7 +178,15 @@ public final class AispectImpactCNNClassifier {
             AispectContactPatch contactPatch,
             AispectTouchNormalizationProfile normalizationProfile
     ) {
-        return predict(window, modelId, contactPatch, normalizationProfile, null);
+        return predict(window, modelId, contactPatch, normalizationProfile, null, null);
+    }
+
+    public AispectModels.ImpactPrediction predict(
+            AispectSignalWindowBuilder.Window window,
+            String modelId,
+            List<AispectTouchFrame> touchFrames
+    ) {
+        return predict(window, modelId, null, null, null, touchFrames);
     }
 
     public AispectModels.ImpactPrediction predict(
@@ -170,11 +196,38 @@ public final class AispectImpactCNNClassifier {
             AispectTouchNormalizationProfile normalizationProfile,
             AispectContactEncodingProfile contactEncodingProfile
     ) {
+        return predict(window, modelId, contactPatch, normalizationProfile, contactEncodingProfile, null);
+    }
+
+    private AispectModels.ImpactPrediction predict(
+            AispectSignalWindowBuilder.Window window,
+            String modelId,
+            AispectContactPatch contactPatch,
+            AispectTouchNormalizationProfile normalizationProfile,
+            AispectContactEncodingProfile contactEncodingProfile,
+            List<AispectTouchFrame> touchFrames
+    ) {
+        AispectTimeGridGroupNormRuntime timeGridRuntime = timeGridRuntimeForId(modelId);
+        if (timeGridRuntime != null) {
+            if (window == null || !window.windowComplete || touchFrames == null) {
+                return null;
+            }
+            double[][] raw = AispectCausalPressFeatureBuilder.buildTimeGrid(
+                    window.frames,
+                    touchFrames,
+                    Math.round(window.downAnchorTimestampSeconds * 1_000_000_000.0),
+                    timeGridRuntime.featureContract()
+            );
+            double[] probabilities = timeGridRuntime.predict(raw);
+            return probabilities == null
+                    ? null
+                    : new AispectModels.ImpactPrediction(probabilities, timeGridRuntime.labelOrder(), modelId);
+        }
         Model model = modelForId(modelId);
-        if (model == null || window == null) {
+        if (model == null || window == null || !window.windowComplete) {
             return null;
         }
-        double[][] features = makeFeatures(window, model, contactPatch, normalizationProfile, contactEncodingProfile);
+        double[][] features = makeFeatures(window, model, contactPatch, normalizationProfile, contactEncodingProfile, touchFrames);
         if (features == null) {
             return null;
         }
@@ -203,7 +256,7 @@ public final class AispectImpactCNNClassifier {
 
     public boolean hasAnyModel() {
         for (ModelInfo info : loadCatalogModels()) {
-            if (modelForId(info.id) != null) {
+            if (timeGridRuntimeForId(info.id) != null || modelForId(info.id) != null) {
                 return true;
             }
         }
@@ -243,11 +296,17 @@ public final class AispectImpactCNNClassifier {
             double[] center = numberArray(scaler.getJSONArray("center"));
             double[] scale = numberArray(scaler.getJSONArray("scale"));
             String[] featureNames = featureNames(scaler, inputChannels);
+            String featureContract = scaler.optString("featureContract", "");
             int[] frameIndices = frameIndices(scaler, info.id);
             Tensor classifier3 = tensor(weights, "classifier.3.weight");
             int classCount = classCount(scaler, classifier3);
             String[] labelOrder = labelOrder(scaler, classCount);
             if (center.length != inputChannels || scale.length != inputChannels || featureNames.length != inputChannels) {
+                return null;
+            }
+            if (usesCausalPressFeatureContract(featureContract)
+                    && (!Arrays.equals(featureNames, AispectCausalPressFeatureBuilder.featureNames(featureContract))
+                    || inputChannels != featureNames.length)) {
                 return null;
             }
             return new Model(
@@ -284,11 +343,35 @@ public final class AispectImpactCNNClassifier {
                     classifier3.values,
                     tensor(weights, "classifier.3.bias").values,
                     classCount,
-                    labelOrder
+                    labelOrder,
+                    featureContract
             );
         } catch (IOException | JSONException | RuntimeException error) {
             return null;
         }
+    }
+
+    private AispectTimeGridGroupNormRuntime timeGridRuntimeForId(String modelId) {
+        if (modelId == null) {
+            return null;
+        }
+        if (!timeGridRuntimeLoadAttempts.containsKey(modelId)) {
+            timeGridRuntimeLoadAttempts.put(modelId, true);
+            ModelInfo info = modelInfoForId(modelId);
+            if (info != null) {
+                try {
+                    JSONObject weights = new JSONObject(readAsset(resourceAssetPath(info.weightsResourceName)));
+                    JSONObject scaler = new JSONObject(readAsset(resourceAssetPath(info.scalerResourceName)));
+                    AispectTimeGridGroupNormRuntime runtime = AispectTimeGridGroupNormRuntime.load(info.id, weights, scaler);
+                    if (runtime != null) {
+                        timeGridRuntimeCache.put(modelId, runtime);
+                    }
+                } catch (IOException | JSONException | RuntimeException error) {
+                    return null;
+                }
+            }
+        }
+        return timeGridRuntimeCache.get(modelId);
     }
 
     private List<ModelInfo> loadCatalogModels() {
@@ -327,13 +410,21 @@ public final class AispectImpactCNNClassifier {
     ) {
         try {
             JSONObject scaler = new JSONObject(readAsset(resourceAssetPath(scalerResourceName)));
-            int inputChannels = scaler.getJSONArray("center").length();
+            boolean isTimeGridRuntime = AispectTimeGridGroupNormRuntime.isSupportedArchitecture(
+                    scaler.optString("runtimeArchitecture", "")
+            );
+            int inputChannels = isTimeGridRuntime
+                    ? scaler.getJSONArray("channels").length()
+                    : scaler.getJSONArray("center").length();
             String[] featureNames = featureNames(scaler, inputChannels);
-            int[] frameIndices = frameIndices(scaler, id);
+            int[] frameIndices = isTimeGridRuntime
+                    ? sequentialFrameIndices(scaler.getInt("frameCount"))
+                    : frameIndices(scaler, id);
             int frameCount = scaler.optInt("frameCount", frameIndices.length);
             int classCount = scaler.optInt("classCount", 2);
             String[] labelOrder = labelOrder(scaler, classCount);
-            return new ModelInfo(id, displayName, weightsResourceName, scalerResourceName, inputChannels, frameCount, frameIndices, featureNames, classCount, labelOrder);
+            String featureContract = scaler.optString("featureContract", "");
+            return new ModelInfo(id, displayName, weightsResourceName, scalerResourceName, inputChannels, frameCount, frameIndices, featureNames, classCount, labelOrder, featureContract);
         } catch (IOException | JSONException | RuntimeException error) {
             return null;
         }
@@ -356,7 +447,7 @@ public final class AispectImpactCNNClassifier {
             channels = 4;
             frameCount = 21;
         }
-        return new ModelInfo(modelId, modelId, weights, scaler, channels, frameCount, indices, features, labelOrder.length, labelOrder);
+        return new ModelInfo(modelId, modelId, weights, scaler, channels, frameCount, indices, features, labelOrder.length, labelOrder, "");
     }
 
     private double[][] makeFeatures(
@@ -364,406 +455,56 @@ public final class AispectImpactCNNClassifier {
             Model model,
             AispectContactPatch contactPatch,
             AispectTouchNormalizationProfile normalizationProfile,
-            AispectContactEncodingProfile contactEncodingProfile
+            AispectContactEncodingProfile contactEncodingProfile,
+            List<AispectTouchFrame> touchFrames
     ) {
-        // 手机端必须按训练导出的 featureNames 顺序取值，任何通道顺序漂移都会让 CNN 权重失效。
-        Map<Integer, AispectModels.ImpactFrame> byIndex = new HashMap<>();
-        for (int i = 0; i < window.frames.length; i++) {
-            byIndex.put(window.firstFrameIndex + i, window.frames[i]);
+        if (usesCausalPressFeatureContract(model.featureContract)) {
+            double[][] raw;
+            if (AispectCausalPressFeatureBuilder.isTimeGridFeatureContract(model.featureContract)) {
+                raw = AispectCausalPressFeatureBuilder.buildTimeGrid(
+                        window.frames,
+                        touchFrames,
+                        Math.round(window.downAnchorTimestampSeconds * 1_000_000_000.0),
+                        model.featureContract
+                );
+            } else {
+                raw = AispectCausalPressFeatureBuilder.build(
+                        window.frames,
+                        window.firstFrameIndex,
+                        model.frameIndices,
+                        touchFrames,
+                        model.featureContract
+                );
+            }
+            return normalizeCausalFeatures(raw, model);
         }
-        ContactFeatureCache contactFeatures = new ContactFeatureCache(contactPatch, normalizationProfile, contactEncodingProfile);
-        double[][] output = new double[model.frameIndices.length][model.inputChannels];
-        for (int frame = 0; frame < model.frameIndices.length; frame++) {
-            AispectModels.ImpactFrame source = byIndex.get(model.frameIndices[frame]);
-            if (source == null) {
-                // 缺失时间帧与训练脚本一致补零，保证短窗口样本仍能推理，不在手机端静默丢样本。
-                source = AispectModels.ImpactFrame.zero();
+        return AispectLegacyFeatureBuilder.build(
+                window,
+                model.frameIndices,
+                model.inputChannels,
+                model.featureNames,
+                model.center,
+                model.scale,
+                contactPatch,
+                normalizationProfile,
+                contactEncodingProfile
+        );
+    }
+
+    private static double[][] normalizeCausalFeatures(double[][] raw, Model model) {
+        if (raw == null || raw.length != model.frameIndices.length) {
+            return null;
+        }
+        double[][] output = new double[raw.length][model.inputChannels];
+        for (int frame = 0; frame < raw.length; frame++) {
+            if (raw[frame] == null || raw[frame].length != model.inputChannels) {
+                return null;
             }
             for (int channel = 0; channel < model.inputChannels; channel++) {
-                double raw = featureValue(source, model.featureNames[channel], contactPatch, normalizationProfile, contactFeatures);
-                output[frame][channel] = (raw - model.center[channel]) / model.scale[channel];
+                output[frame][channel] = (raw[frame][channel] - model.center[channel]) / model.scale[channel];
             }
         }
         return output;
-    }
-
-    private static double featureValue(
-            AispectModels.ImpactFrame frame,
-            String name,
-            AispectContactPatch contactPatch,
-            AispectTouchNormalizationProfile normalizationProfile,
-            ContactFeatureCache contactFeatures
-    ) {
-        if ("delta".equals(name)) {
-            return frame.delta;
-        }
-        if ("x".equals(name) || "userAcceleration.x".equals(name)) {
-            return frame.x;
-        }
-        if ("y".equals(name) || "userAcceleration.y".equals(name)) {
-            return frame.y;
-        }
-        if ("z".equals(name) || "userAcceleration.z".equals(name)) {
-            return frame.z;
-        }
-        if ("rotationRate.x".equals(name)) {
-            return frame.rotationRateX;
-        }
-        if ("rotationRate.y".equals(name)) {
-            return frame.rotationRateY;
-        }
-        if ("rotationRate.z".equals(name)) {
-            return frame.rotationRateZ;
-        }
-        if ("gravity.x".equals(name)) {
-            return frame.gravityX;
-        }
-        if ("gravity.y".equals(name)) {
-            return frame.gravityY;
-        }
-        if ("gravity.z".equals(name)) {
-            return frame.gravityZ;
-        }
-        if ("x_norm".equals(name)) {
-            return frame.xNorm;
-        }
-        if ("y_norm".equals(name)) {
-            return frame.yNorm;
-        }
-        if ("time_since_touch_down".equals(name)) {
-            return frame.timeSinceTouchDown;
-        }
-        if ("time_since_anchor".equals(name)) {
-            return frame.timeSinceAnchor;
-        }
-        if (name != null && name.startsWith("contactPatch.")) {
-            return contactPatchValue(contactPatch, normalizationProfile, name);
-        }
-        if (name != null && name.startsWith("touchNormalization.")) {
-            return touchNormalizationValue(normalizationProfile, name);
-        }
-        if (name != null && contactFeatures != null) {
-            return contactFeatures.value(name);
-        }
-        return 0;
-    }
-
-    private static final class ContactFeatureCache {
-        // 接触特征缓存负责把同一份原始接触区域映射成高斯、多通道和协方差三种训练表达。
-        private final AispectContactPatch patch;
-        private final AispectContactEncodingProfile encodingProfile;
-        private double[] gaussianMap;
-        private double gaussianSum = Double.NaN;
-        private double gaussianEnergy = Double.NaN;
-        private double gaussianSpread = Double.NaN;
-
-        ContactFeatureCache(
-                AispectContactPatch contactPatch,
-                AispectTouchNormalizationProfile normalizationProfile,
-                AispectContactEncodingProfile contactEncodingProfile
-        ) {
-            if (contactPatch != null) {
-                patch = contactPatch;
-            } else if (normalizationProfile != null) {
-                patch = normalizationProfile.contactPatch;
-            } else {
-                patch = null;
-            }
-            encodingProfile = contactEncodingProfile;
-        }
-
-        double value(String name) {
-            if (name.startsWith("gaussian.map.")) {
-                int index = parseMapIndex(name);
-                double[] map = mapValues();
-                if (index >= 0 && index < map.length) {
-                    return map[index];
-                }
-                return 0;
-            }
-            if ("gaussian.center".equals(name)) {
-                double[] map = mapValues();
-                return map[(CONTACT_MAP_SIZE * CONTACT_MAP_SIZE) / 2];
-            }
-            if ("gaussian.sum".equals(name)) {
-                return gaussianSum();
-            }
-            if ("gaussian.energy".equals(name)) {
-                return gaussianEnergy();
-            }
-            if ("gaussian.spread".equals(name)) {
-                return gaussianSpread();
-            }
-            if ("gaussian.sigma_x_px".equals(name)) {
-                return sigmaXPx();
-            }
-            if ("gaussian.sigma_y_px".equals(name)) {
-                return sigmaYPx();
-            }
-            if ("gaussian.valid_mask".equals(name)) {
-                return validMask();
-            }
-            if ("multi.center_x_norm".equals(name) || "covariance.x_norm".equals(name)) {
-                if (encodingProfile != null && encodingProfile.covarianceMatrix != null) {
-                    return encodingProfile.covarianceMatrix.centerXNorm;
-                }
-                return patch == null ? 0 : patch.xNorm;
-            }
-            if ("multi.center_y_norm".equals(name) || "covariance.y_norm".equals(name)) {
-                if (encodingProfile != null && encodingProfile.covarianceMatrix != null) {
-                    return encodingProfile.covarianceMatrix.centerYNorm;
-                }
-                return patch == null ? 0 : patch.yNorm;
-            }
-            if ("multi.major_px".equals(name)) {
-                return rawMajorPx();
-            }
-            if ("multi.minor_px".equals(name)) {
-                return rawMinorPx();
-            }
-            if ("multi.orientation_rad".equals(name)) {
-                return patch == null ? 0 : patch.orientationRad;
-            }
-            if ("multi.valid_mask".equals(name) || "covariance.valid_mask".equals(name)) {
-                return validMask();
-            }
-            if ("covariance.cov_11".equals(name)) {
-                if (encodingProfile != null && encodingProfile.covarianceMatrix != null) {
-                    return encodingProfile.covarianceMatrix.covariance11;
-                }
-                return patch == null ? 0 : patch.covariance11;
-            }
-            if ("covariance.cov_12".equals(name)) {
-                if (encodingProfile != null && encodingProfile.covarianceMatrix != null) {
-                    return encodingProfile.covarianceMatrix.covariance12;
-                }
-                return patch == null ? 0 : patch.covariance12;
-            }
-            if ("covariance.cov_22".equals(name)) {
-                if (encodingProfile != null && encodingProfile.covarianceMatrix != null) {
-                    return encodingProfile.covarianceMatrix.covariance22;
-                }
-                return patch == null ? 0 : patch.covariance22;
-            }
-            return 0;
-        }
-
-        private double[] mapValues() {
-            if (gaussianMap != null) {
-                return gaussianMap;
-            }
-            if (encodingProfile != null && encodingProfile.gaussianMap != null && encodingProfile.gaussianMap.heatmap != null) {
-                // 新样本优先读取采集时已落盘的热图，保证训练端和手机端使用同一套编码。
-                gaussianMap = encodingProfile.gaussianMap.heatmap.clone();
-                if (gaussianMap.length == CONTACT_MAP_SIZE * CONTACT_MAP_SIZE) {
-                    return gaussianMap;
-                }
-            }
-            // 历史样本或缺失编码时现场重建热图，并用默认 sigma 配合 validMask 表示未知接触区域。
-            gaussianMap = buildGaussianMap(sigmaXPx(), sigmaYPx(), patch == null ? 0 : patch.orientationRad);
-            return gaussianMap;
-        }
-
-        private double gaussianSum() {
-            if (Double.isNaN(gaussianSum)) {
-                double total = 0;
-                for (double value : mapValues()) {
-                    total += value;
-                }
-                gaussianSum = total;
-            }
-            return gaussianSum;
-        }
-
-        private double gaussianEnergy() {
-            if (Double.isNaN(gaussianEnergy)) {
-                double total = 0;
-                for (double value : mapValues()) {
-                    total += value * value;
-                }
-                gaussianEnergy = total;
-            }
-            return gaussianEnergy;
-        }
-
-        private double gaussianSpread() {
-            if (Double.isNaN(gaussianSpread)) {
-                double total = gaussianSum();
-                if (total <= 0) {
-                    gaussianSpread = 0;
-                } else {
-                    int center = CONTACT_MAP_SIZE / 2;
-                    int index = 0;
-                    double spread = 0;
-                    for (int y = 0; y < CONTACT_MAP_SIZE; y++) {
-                        for (int x = 0; x < CONTACT_MAP_SIZE; x++) {
-                            double dx = x - center;
-                            double dy = y - center;
-                            spread += mapValues()[index] * Math.sqrt(dx * dx + dy * dy);
-                            index += 1;
-                        }
-                    }
-                    gaussianSpread = spread / total;
-                }
-            }
-            return gaussianSpread;
-        }
-
-        private double sigmaXPx() {
-            double raw = rawMajorPx();
-            if (validMask() > 0 && raw > 0) {
-                return Math.max(1.0, raw * 0.5);
-            }
-            // 缺半径时不能填零，零会被模型误解成极小接触；默认值只作占位，可信度由 validMask 表达。
-            return CONTACT_DEFAULT_SIGMA_PX;
-        }
-
-        private double sigmaYPx() {
-            double raw = rawMinorPx();
-            if (validMask() > 0 && raw > 0) {
-                return Math.max(1.0, raw * 0.5);
-            }
-            // 缺半径时不能填零，零会被模型误解成极小接触；默认值只作占位，可信度由 validMask 表达。
-            return CONTACT_DEFAULT_SIGMA_PX;
-        }
-
-        private double rawMajorPx() {
-            if (encodingProfile != null && encodingProfile.multiChannel != null) {
-                return encodingProfile.multiChannel.rawMajorPx;
-            }
-            if (patch != null && patch.rawMajorPx > 0) {
-                return patch.rawMajorPx;
-            }
-            if (patch != null && patch.sigmaXNorm > 0) {
-                return patch.sigmaXNorm * 2.0;
-            }
-            return CONTACT_DEFAULT_SIGMA_PX * 2.0;
-        }
-
-        private double rawMinorPx() {
-            if (encodingProfile != null && encodingProfile.multiChannel != null) {
-                return encodingProfile.multiChannel.rawMinorPx;
-            }
-            if (patch != null && patch.rawMinorPx > 0) {
-                return patch.rawMinorPx;
-            }
-            if (patch != null && patch.sigmaYNorm > 0) {
-                return patch.sigmaYNorm * 2.0;
-            }
-            return CONTACT_DEFAULT_SIGMA_PX * 2.0;
-        }
-
-        private double validMask() {
-            if (encodingProfile != null && encodingProfile.multiChannel != null) {
-                return encodingProfile.multiChannel.validMask;
-            }
-            return patch != null && patch.valid ? 1.0 : 0.0;
-        }
-    }
-
-    private static double[] buildGaussianMap(double sigmaXPx, double sigmaYPx, double orientationRad) {
-        // 固定 9x9 热图把不同来源的半径和椭圆统一成接触概率图，便于和离线 CNN 训练对齐。
-        double[] output = new double[CONTACT_MAP_SIZE * CONTACT_MAP_SIZE];
-        double cos = Math.cos(orientationRad);
-        double sin = Math.sin(orientationRad);
-        int center = CONTACT_MAP_SIZE / 2;
-        int index = 0;
-        for (int y = 0; y < CONTACT_MAP_SIZE; y++) {
-            for (int x = 0; x < CONTACT_MAP_SIZE; x++) {
-                double dx = ((x - center) / (double) center) * CONTACT_GRID_RADIUS_PX;
-                double dy = ((y - center) / (double) center) * CONTACT_GRID_RADIUS_PX;
-                double rotatedX = cos * dx + sin * dy;
-                double rotatedY = -sin * dx + cos * dy;
-                double exponent = -0.5 * (
-                        (rotatedX * rotatedX) / Math.max(1.0, sigmaXPx * sigmaXPx)
-                                + (rotatedY * rotatedY) / Math.max(1.0, sigmaYPx * sigmaYPx)
-                );
-                output[index] = Math.exp(exponent);
-                index += 1;
-            }
-        }
-        return output;
-    }
-
-    private static int parseMapIndex(String name) {
-        try {
-            return Integer.parseInt(name.substring("gaussian.map.".length()));
-        } catch (NumberFormatException error) {
-            return -1;
-        }
-    }
-
-    private static double contactPatchValue(
-            AispectContactPatch contactPatch,
-            AispectTouchNormalizationProfile normalizationProfile,
-            String name
-    ) {
-        // 增强 22 通道优先读取整次触摸的接触区域，归一化画像只作为缺参兜底来源。
-        AispectContactPatch patch = contactPatch;
-        if (patch == null && normalizationProfile != null) {
-            patch = normalizationProfile.contactPatch;
-        }
-        if (patch == null) {
-            return 0;
-        }
-        if ("contactPatch.cov_11".equals(name)) {
-            return patch.covariance11;
-        }
-        if ("contactPatch.cov_12".equals(name)) {
-            return patch.covariance12;
-        }
-        if ("contactPatch.cov_22".equals(name)) {
-            return patch.covariance22;
-        }
-        if ("contactPatch.sigmaX".equals(name)) {
-            return patch.sigmaXNorm;
-        }
-        if ("contactPatch.sigmaY".equals(name)) {
-            return patch.sigmaYNorm;
-        }
-        if ("contactPatch.rawMajorPx".equals(name)) {
-            return patch.rawMajorPx;
-        }
-        if ("contactPatch.rawMinorPx".equals(name)) {
-            return patch.rawMinorPx;
-        }
-        return 0;
-    }
-
-    private static double touchNormalizationValue(AispectTouchNormalizationProfile normalizationProfile, String name) {
-        // touchNormalization 输出的是当前选中画像的数值和质量信号，其中 confidence 不是力度标签。
-        if (normalizationProfile == null || normalizationProfile.selectedResult == null) {
-            return 0;
-        }
-        AispectTouchNormalizationProfile.Result selected = normalizationProfile.selectedResult;
-        if ("touchNormalization.majorValue".equals(name)) {
-            return selected.majorValue;
-        }
-        if ("touchNormalization.minorValue".equals(name)) {
-            return selected.minorValue;
-        }
-        if ("touchNormalization.areaValue".equals(name)) {
-            return selected.areaValue;
-        }
-        if ("touchNormalization.confidence".equals(name)) {
-            return selected.confidence;
-        }
-        if ("touchNormalization.rawMajorPx".equals(name)) {
-            return selected.rawMajorPx;
-        }
-        if ("touchNormalization.rawMinorPx".equals(name)) {
-            return selected.rawMinorPx;
-        }
-        if ("touchNormalization.screenAreaValue".equals(name) && normalizationProfile.screenScale != null) {
-            return normalizationProfile.screenScale.areaValue;
-        }
-        if ("touchNormalization.covarianceAreaValue".equals(name) && normalizationProfile.covarianceMatrix != null) {
-            return normalizationProfile.covarianceMatrix.areaValue;
-        }
-        if ("touchNormalization.baselineAreaValue".equals(name) && normalizationProfile.sessionBaseline != null) {
-            return normalizationProfile.sessionBaseline.areaValue;
-        }
-        return 0;
     }
 
     private static double[][] transposeToChannels(double[][] frames, int channels, int length) {
@@ -939,6 +680,14 @@ public final class AispectImpactCNNClassifier {
         return new int[0];
     }
 
+    private static int[] sequentialFrameIndices(int count) {
+        int[] indices = new int[Math.max(0, count)];
+        for (int index = 0; index < indices.length; index++) {
+            indices[index] = index;
+        }
+        return indices;
+    }
+
     private static String[] featureNames(JSONObject scaler, int inputChannels) throws JSONException {
         if (scaler.has("featureNames")) {
             JSONArray array = scaler.getJSONArray("featureNames");
@@ -1056,6 +805,7 @@ public final class AispectImpactCNNClassifier {
         final double[] classifier3Bias;
         final int classCount;
         final String[] labelOrder;
+        final String featureContract;
 
         Model(
                 String id,
@@ -1091,7 +841,8 @@ public final class AispectImpactCNNClassifier {
                 double[] classifier3Weight,
                 double[] classifier3Bias,
                 int classCount,
-                String[] labelOrder
+                String[] labelOrder,
+                String featureContract
         ) {
             this.id = id;
             this.inputChannels = inputChannels;
@@ -1127,6 +878,7 @@ public final class AispectImpactCNNClassifier {
             this.classifier3Bias = classifier3Bias;
             this.classCount = classCount;
             this.labelOrder = labelOrder;
+            this.featureContract = featureContract == null ? "" : featureContract;
         }
     }
 }

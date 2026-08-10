@@ -16,6 +16,7 @@ from run_android_touch_ablation import train_diagonal_lda
 from train_android_touch_cnn import DEFAULT_FEATURES
 from train_android_touch_cnn import PATCH_FEATURES
 from train_android_touch_cnn import feature_value
+from train_android_touch_cnn import frame_index_for_reference
 
 
 FEATURE_PRESETS = {
@@ -126,7 +127,7 @@ def load_samples(manifest_path, feature_names, frame_indices):
                 frames_by_index[int_value(frame.get("frameIndex"), 0)] = frame
             frame_values = {}
             for frame_index in frame_indices:
-                frame = frames_by_index.get(frame_index, {})
+                frame = frames_by_index.get(frame_index_for_reference(data, frame_index), {})
                 frame_values[frame_index] = [
                     finite_float(feature_value(data, frame, feature_name), 0.0)
                     for feature_name in feature_names

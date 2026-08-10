@@ -16,6 +16,7 @@ from train_android_touch_cnn import DEFAULT_FEATURES
 from train_android_touch_cnn import DEFAULT_FRAME_INDICES
 from train_android_touch_cnn import PATCH_FEATURES
 from train_android_touch_cnn import feature_value
+from train_android_touch_cnn import frame_index_for_reference
 
 
 GAUSSIAN_MAP_FEATURES = [f"gaussian.map.{index:02d}" for index in range(MAP_SIZE * MAP_SIZE)]
@@ -251,7 +252,7 @@ def build_vector(data, preset, frame_indices):
         by_index[int_value(frame.get("frameIndex"), 0)] = frame
     values = []
     for frame_index in frame_indices:
-        frame = by_index.get(frame_index)
+        frame = by_index.get(frame_index_for_reference(data, frame_index))
         if frame is None:
             return None
         for feature_name in preset["frameFeatures"]:

@@ -1,0 +1,170 @@
+{
+  "artifact": "function-field-model",
+  "analysisId": "existing-data-limited-gain-20260731",
+  "dependsOn": [
+    "resource-graph.json",
+    "actor-network.json"
+  ],
+  "mainUsefulFunction": "produce a stable four-class prediction from natural touch behavior across sessions, collectors, and devices",
+  "functionFields": [
+    {
+      "id": "ff_physical_touch",
+      "carrier": "human_finger",
+      "field": "mechanical_touch_force_and_motion",
+      "receiver": "touchscreen_and_phone_body",
+      "result": "physical_touch_response",
+      "status": "variable",
+      "risk": "finger posture and subjective force vary within the same label"
+    },
+    {
+      "id": "ff_sensor_conversion",
+      "carrier": "touchscreen_and_imu",
+      "field": "device_sensor_conversion",
+      "receiver": "collection_runtime",
+      "result": "digital_touch_and_imu_signal",
+      "status": "harmful_field_mixed_with_useful_field",
+      "risk": "device scale, timing, and noise are mixed with class information"
+    },
+    {
+      "id": "ff_manual_label",
+      "carrier": "collector",
+      "field": "manual_label_assignment",
+      "receiver": "sample_record",
+      "result": "four_class_ground_truth",
+      "status": "incomplete_reference",
+      "risk": "light and heavy have no independent physical reference"
+    },
+    {
+      "id": "ff_signal_label_binding",
+      "carrier": "collection_runtime",
+      "field": "timestamp_and_schema_binding",
+      "receiver": "raw_dataset",
+      "result": "labeled_temporal_sample",
+      "status": "mixed_schema",
+      "risk": "schema and anchor semantics differ across collection generations"
+    },
+    {
+      "id": "ff_quality_control",
+      "carrier": "cleaning_pipeline",
+      "field": "quality_rules_and_temporal_thinning",
+      "receiver": "training_manifest",
+      "result": "weighted_training_rows",
+      "status": "partially_effective",
+      "risk": "proxy quality rules cannot prove label correctness or statistical independence"
+    },
+    {
+      "id": "ff_split_control",
+      "carrier": "split_pipeline",
+      "field": "partition_policy",
+      "receiver": "training_and_validation_sets",
+      "result": "generalization_test_boundary",
+      "status": "multiple_conflicting_boundaries",
+      "risk": "random and strict folds answer different questions but may compete in model selection"
+    },
+    {
+      "id": "ff_feature_conversion",
+      "carrier": "feature_pipeline",
+      "field": "window_alignment_and_normalization",
+      "receiver": "model_input_tensor",
+      "result": "fixed_shape_features",
+      "status": "field_mismatch_risk",
+      "risk": "class signal and domain identity are not explicitly separated"
+    },
+    {
+      "id": "ff_model_learning",
+      "carrier": "training_pipeline",
+      "field": "weighted_gradient_optimization",
+      "receiver": "model_parameters",
+      "result": "four_class_decision_function",
+      "status": "locally_effective",
+      "risk": "optimization can reward domain shortcuts under correlated training evidence"
+    },
+    {
+      "id": "ff_offline_evaluation",
+      "carrier": "evaluation_pipeline",
+      "field": "metric_computation",
+      "receiver": "deployment_decision",
+      "result": "candidate_ranking",
+      "status": "weak_control_field",
+      "risk": "strict generalization metrics do not consistently gate deployment"
+    },
+    {
+      "id": "ff_runtime_reconstruction",
+      "carrier": "android_runtime",
+      "field": "realtime_feature_reconstruction",
+      "receiver": "deployed_model",
+      "result": "phone_prediction",
+      "status": "unverified_equivalence",
+      "risk": "offline and runtime feature values lack end-to-end numerical parity evidence"
+    },
+    {
+      "id": "ff_early_prediction",
+      "carrier": "action_down_touch_frame",
+      "field": "single_frame_feature_extraction",
+      "receiver": "first_touch_mlp",
+      "result": "immediate_early_prediction",
+      "status": "implemented_but_low_information",
+      "risk": "this input contract is not the proposed ACTION_DOWN-anchored IMU window"
+    },
+    {
+      "id": "ff_final_prediction",
+      "carrier": "touch_end_anchored_imu_window",
+      "field": "old13_temporal_feature_extraction",
+      "receiver": "final_touch_cnn",
+      "result": "post_touch_prediction",
+      "status": "implemented",
+      "risk": "touch-end information cannot support a pre-lift output requirement"
+    },
+    {
+      "id": "ff_feedback",
+      "carrier": "phone_tester",
+      "field": "real_world_acceptance_observation",
+      "receiver": "training_decision",
+      "result": "model_revision_request",
+      "status": "information_incomplete",
+      "risk": "unstructured feedback cannot localize the failing class, domain, window, or runtime stage"
+    }
+  ],
+  "logicGates": [
+    {
+      "id": "and_real_gain",
+      "type": "AND",
+      "output": "real_world_gain",
+      "inputs": [
+        "independent_training_information",
+        "consistent_labels",
+        "class_stable_representation",
+        "leakage_resistant_validation",
+        "runtime_feature_equivalence",
+        "deployment_gate_alignment"
+      ],
+      "interpretation": "failure of any one input can block real-world gain"
+    },
+    {
+      "id": "or_limited_gain",
+      "type": "OR",
+      "output": "limited_or_negative_gain",
+      "inputs": [
+        "correlated_samples",
+        "label_inconsistency",
+        "device_shortcut",
+        "validation_leakage",
+        "window_anchor_mismatch",
+        "runtime_mismatch",
+        "weak_feedback_writeback"
+      ],
+      "interpretation": "all active causes must be measured and controlled before limited gain can be eliminated"
+    }
+  ],
+  "dominantDiagnosis": {
+    "harmfulField": "domain_identity_signal",
+    "usefulField": "finger_and_strength_signal",
+    "receiver": "model_input_and_parameters",
+    "conflict": "both signals occupy the same feature channels and pooled training objective",
+    "evidence": [
+      "random_split_balanced_accuracy_0.8377",
+      "collection_holdout_balanced_accuracy_range_0.2741_to_0.6728",
+      "additional_30827_rows_changed_validation_balanced_accuracy_by_minus_0.0205"
+    ]
+  }
+}

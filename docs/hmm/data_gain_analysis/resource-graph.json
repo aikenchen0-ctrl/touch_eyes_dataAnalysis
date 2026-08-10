@@ -1,0 +1,288 @@
+{
+  "artifact": "resource-graph",
+  "analysisId": "existing-data-limited-gain-20260731",
+  "scope": "four-class touch classification data, training, evaluation, deployment, and feedback",
+  "targetFunction": "convert additional raw samples into stable cross-session, cross-collector, and cross-device classification gain",
+  "resources": [
+    {
+      "id": "r_raw_unique",
+      "layer": "system",
+      "type": "data",
+      "availability": "existing",
+      "cost": "sunk",
+      "quantity": 89385,
+      "description": "Deduplicated raw JSON samples"
+    },
+    {
+      "id": "r_legacy_v2",
+      "layer": "subsystem",
+      "type": "data",
+      "availability": "existing",
+      "cost": "sunk",
+      "quantity": 30214,
+      "description": "Legacy schema version 2 samples"
+    },
+    {
+      "id": "r_new_v3",
+      "layer": "subsystem",
+      "type": "data",
+      "availability": "existing",
+      "cost": "sunk",
+      "quantity": 59171,
+      "description": "Extended schema version 3 samples"
+    },
+    {
+      "id": "r_training_rows",
+      "layer": "subsystem",
+      "type": "derived_data",
+      "availability": "existing",
+      "cost": "low",
+      "quantity": 79878,
+      "description": "Rows retained after quality processing and temporal thinning"
+    },
+    {
+      "id": "r_session_groups",
+      "layer": "subsystem",
+      "type": "group_metadata",
+      "availability": "existing_underused",
+      "cost": "free",
+      "quantity": 358,
+      "description": "Session groups available for leakage-resistant splitting and effective sample size analysis"
+    },
+    {
+      "id": "r_domain_metadata",
+      "layer": "subsystem",
+      "type": "group_metadata",
+      "availability": "existing_underused",
+      "cost": "free",
+      "description": "Collector, device, date, collection, motion state, and schema version metadata"
+    },
+    {
+      "id": "r_quality_metadata",
+      "layer": "subsystem",
+      "type": "quality_metadata",
+      "availability": "existing",
+      "cost": "free",
+      "description": "Quality bucket, review reasons, rejection reasons, and bounded sample weights"
+    },
+    {
+      "id": "r_common_old13",
+      "layer": "subsystem",
+      "type": "feature_space",
+      "availability": "existing",
+      "cost": "low",
+      "description": "Common coordinates, IMU, gravity, and timing channels shared across schema versions"
+    },
+    {
+      "id": "r_extended_contact",
+      "layer": "subsystem",
+      "type": "feature_space",
+      "availability": "existing_partial",
+      "cost": "low",
+      "description": "Contact patch, contact encoding, and touch normalization fields concentrated in newer samples"
+    },
+    {
+      "id": "r_full_temporal_signal",
+      "layer": "subsystem",
+      "type": "temporal_signal",
+      "availability": "existing_underused",
+      "cost": "low",
+      "description": "Raw IMU and touch sequences extending beyond the fixed training window"
+    },
+    {
+      "id": "r_strict_folds",
+      "layer": "anti_system",
+      "type": "evaluation",
+      "availability": "existing",
+      "cost": "free",
+      "description": "Domain, collection, temporal-tail, and session-isolated validation folds"
+    },
+    {
+      "id": "r_random_fold",
+      "layer": "anti_system",
+      "type": "evaluation",
+      "availability": "existing",
+      "cost": "free",
+      "description": "Random validation fold retained only as a diagnostic baseline"
+    },
+    {
+      "id": "r_training_reports",
+      "layer": "anti_system",
+      "type": "evidence",
+      "availability": "existing",
+      "cost": "free",
+      "description": "Historical metrics, class recalls, confusion matrices, and model arguments"
+    },
+    {
+      "id": "r_model_catalog",
+      "layer": "adjacent_system",
+      "type": "deployment",
+      "availability": "existing",
+      "cost": "free",
+      "description": "Multiple retained Android model assets and runtime model selection"
+    },
+    {
+      "id": "r_phone_feedback",
+      "layer": "adjacent_system",
+      "type": "real_world_feedback",
+      "availability": "existing_unstructured",
+      "cost": "low",
+      "description": "Connected-device testing and user acceptance feedback without a standardized trial ledger"
+    },
+    {
+      "id": "r_pipeline_code",
+      "layer": "subsystem",
+      "type": "operator",
+      "availability": "existing",
+      "cost": "low",
+      "description": "Cleaning, thinning, feature extraction, training, export, and deployment code with tests"
+    },
+    {
+      "id": "r_objective_force_reference",
+      "layer": "super_system",
+      "type": "missing_measurement",
+      "availability": "missing",
+      "cost": "high",
+      "description": "External physical reference for consistent light and heavy touch labels"
+    },
+    {
+      "id": "r_user_diversity",
+      "layer": "super_system",
+      "type": "missing_coverage",
+      "availability": "insufficient",
+      "cost": "high",
+      "description": "Independent users with different hand geometry and touch behavior"
+    },
+    {
+      "id": "r_device_diversity",
+      "layer": "super_system",
+      "type": "missing_coverage",
+      "availability": "insufficient",
+      "cost": "high",
+      "description": "Independent devices and sensor implementations beyond current domains"
+    },
+    {
+      "id": "r_runtime_equivalence_evidence",
+      "layer": "anti_system",
+      "type": "missing_evidence",
+      "availability": "incomplete",
+      "cost": "medium",
+      "description": "Field-by-field proof that Android runtime preprocessing matches offline preprocessing"
+    },
+    {
+      "id": "r_standard_phone_trials",
+      "layer": "anti_system",
+      "type": "missing_evidence",
+      "availability": "missing",
+      "cost": "medium",
+      "description": "Repeatable per-class phone trials with expected labels and confusion matrices"
+    }
+  ],
+  "relations": [
+    {
+      "from": "r_raw_unique",
+      "to": "r_training_rows",
+      "relation": "filtered_and_temporally_thinned_into"
+    },
+    {
+      "from": "r_legacy_v2",
+      "to": "r_common_old13",
+      "relation": "provides"
+    },
+    {
+      "from": "r_new_v3",
+      "to": "r_common_old13",
+      "relation": "provides"
+    },
+    {
+      "from": "r_new_v3",
+      "to": "r_extended_contact",
+      "relation": "primarily_provides"
+    },
+    {
+      "from": "r_session_groups",
+      "to": "r_strict_folds",
+      "relation": "enables"
+    },
+    {
+      "from": "r_domain_metadata",
+      "to": "r_strict_folds",
+      "relation": "enables"
+    },
+    {
+      "from": "r_quality_metadata",
+      "to": "r_training_rows",
+      "relation": "weights"
+    },
+    {
+      "from": "r_pipeline_code",
+      "to": "r_training_rows",
+      "relation": "transforms"
+    },
+    {
+      "from": "r_training_reports",
+      "to": "r_model_catalog",
+      "relation": "should_gate"
+    },
+    {
+      "from": "r_strict_folds",
+      "to": "r_model_catalog",
+      "relation": "currently_weak_gate"
+    },
+    {
+      "from": "r_phone_feedback",
+      "to": "r_training_reports",
+      "relation": "requires_structured_writeback"
+    },
+    {
+      "from": "r_runtime_equivalence_evidence",
+      "to": "r_phone_feedback",
+      "relation": "separates_model_error_from_runtime_error"
+    },
+    {
+      "from": "r_objective_force_reference",
+      "to": "r_quality_metadata",
+      "relation": "would_reduce_label_uncertainty"
+    }
+  ],
+  "priorityOrder": [
+    {
+      "rank": 1,
+      "resourceIds": [
+        "r_session_groups",
+        "r_domain_metadata",
+        "r_strict_folds",
+        "r_training_reports"
+      ],
+      "reason": "Existing free resources can measure independent information and expose leakage before new collection"
+    },
+    {
+      "rank": 2,
+      "resourceIds": [
+        "r_full_temporal_signal",
+        "r_common_old13",
+        "r_extended_contact",
+        "r_quality_metadata"
+      ],
+      "reason": "Existing signals can be tested for stable class information versus domain identity"
+    },
+    {
+      "rank": 3,
+      "resourceIds": [
+        "r_runtime_equivalence_evidence",
+        "r_standard_phone_trials",
+        "r_phone_feedback"
+      ],
+      "reason": "Runtime and real-world evidence are required to connect offline metrics to actual gain"
+    },
+    {
+      "rank": 4,
+      "resourceIds": [
+        "r_objective_force_reference",
+        "r_user_diversity",
+        "r_device_diversity"
+      ],
+      "reason": "New costly resources should be added only after existing evidence identifies the remaining coverage gap"
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 6,
+  "referenceFrameIndex": 0,
+  "downReferenceFrameIndex": 0,
+  "liftReferenceFrameIndex": 1,
+  "timeSinceAnchor": -0.05,
+  "timeSinceTouchDown": 0.05,
+  "contactPatch": {
+    "covariance": {
+      "cov_11": 999.0
+    }
+  },
+  "touchNormalization": {
+    "confidence": 1.0
+  },
+  "frames": [
+    {
+      "frameIndex": 0,
+      "sensorTimestampElapsedRealtimeNanos": 200,
+      "receivedElapsedRealtimeNanos": 200,
+      "x": 1.0,
+      "y": 2.0,
+      "z": 3.0,
+      "rotationRateX": 4.0,
+      "rotationRateY": 5.0,
+      "rotationRateZ": 6.0,
+      "gravityX": 7.0,
+      "gravityY": 8.0,
+      "gravityZ": 9.0,
+      "timeSinceAnchor": -0.05,
+      "timeSinceTouchDown": 0.05
+    },
+    {
+      "frameIndex": 1,
+      "sensorTimestampElapsedRealtimeNanos": 350,
+      "receivedElapsedRealtimeNanos": 350,
+      "x": 10.0,
+      "y": 11.0,
+      "z": 12.0,
+      "rotationRateX": 13.0,
+      "rotationRateY": 14.0,
+      "rotationRateZ": 15.0,
+      "gravityX": 16.0,
+      "gravityY": 17.0,
+      "gravityZ": 18.0,
+      "timeSinceAnchor": 0.0,
+      "timeSinceTouchDown": 0.10
+    }
+  ],
+  "touchFrames": [
+    {
+      "receivedElapsedRealtimeNanos": 100,
+      "eventElapsedRealtimeNanos": 90,
+      "x_norm": 0.25,
+      "y_norm": 0.50,
+      "pressure": 1.25,
+      "size": 0.50,
+      "touchMajor": 50.0,
+      "touchMinor": 25.0,
+      "orientation": 0.5235987755982988,
+      "pointerCount": 2,
+      "viewWidthPx": 300,
+      "viewHeightPx": 400,
+      "axisAvailability": {
+        "hasOrientationRange": true
+      }
+    },
+    {
+      "receivedElapsedRealtimeNanos": 300,
+      "eventElapsedRealtimeNanos": 290,
+      "x_norm": 0.80,
+      "y_norm": 0.10,
+      "pressure": 0.20,
+      "size": -0.20,
+      "touchMajor": 100.0,
+      "touchMinor": 25.0,
+      "orientation": 0.0,
+      "pointerCount": 3,
+      "viewWidthPx": 600,
+      "viewHeightPx": 800,
+      "axisAvailability": {
+        "hasOrientationRange": true
+      }
+    },
+    {
+      "receivedElapsedRealtimeNanos": 500,
+      "eventElapsedRealtimeNanos": 490,
+      "x_norm": 0.99,
+      "y_norm": 0.99,
+      "pressure": 0.99,
+      "size": 0.99,
+      "touchMajor": 999.0,
+      "touchMinor": 1.0,
+      "orientation": 1.0,
+      "pointerCount": 9,
+      "viewWidthPx": 100,
+      "viewHeightPx": 100,
+      "axisAvailability": {
+        "hasOrientationRange": true
+      }
+    }
+  ],
+  "expected": {
+    "causal_imu12_v1": [
+      [0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 1.0],
+      [0.8, 0.1, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 1.0]
+    ],
+    "causal_imu11_touch9_v1": [
+      [0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 1.0, 0.5, 0.1, 0.05, 0.6931471805599453, 0.5, 0.8660254037844386, 2.0, 1.0],
+      [0.8, 0.1, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 0.2, 0.0, 0.1, 0.025, 1.3862943611198906, 0.0, 1.0, 3.0, 1.0]
+    ]
+  }
+}

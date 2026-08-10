@@ -16,7 +16,7 @@ public final class AispectImpactSignalCollector {
     public static final class Config {
         public int samplePeriodUs = 4167;
         public int fallbackSamplePeriodUs = 10000;
-        public int rollingFrameLimit = 600;
+        public int rollingFrameLimit = 1200;
         public double axisWeightX = 0.01;
         public double axisWeightY = 1.0;
         public double axisWeightZ = 6.5;
@@ -26,6 +26,7 @@ public final class AispectImpactSignalCollector {
         public final List<AispectModels.ImpactFrame> frames;
         public final double sampleRateHz;
         public final String accelerationSensorName;
+        public final String accelerationSensorSource;
         public final boolean hasGyroscope;
         public final boolean hasGravity;
 
@@ -33,12 +34,14 @@ public final class AispectImpactSignalCollector {
                 List<AispectModels.ImpactFrame> frames,
                 double sampleRateHz,
                 String accelerationSensorName,
+                String accelerationSensorSource,
                 boolean hasGyroscope,
                 boolean hasGravity
         ) {
             this.frames = frames;
             this.sampleRateHz = sampleRateHz;
             this.accelerationSensorName = accelerationSensorName;
+            this.accelerationSensorSource = accelerationSensorSource;
             this.hasGyroscope = hasGyroscope;
             this.hasGravity = hasGravity;
         }
@@ -66,17 +69,15 @@ public final class AispectImpactSignalCollector {
     private Handler handler;
     private boolean isRunning;
     private int activeSamplePeriodUs;
-    private double sensorToUptimeOffsetSeconds;
     private long lastSampleSensorNanos;
-    private double lastMagnitude;
     private double averageSampleIntervalSeconds;
-    private boolean hasBaseline;
     private double gyroX;
     private double gyroY;
     private double gyroZ;
     private double gravityX;
     private double gravityY;
     private double gravityZ;
+    private long gravitySensorTimestampNanos;
     private double touchXNorm;
     private double touchYNorm;
     private double touchDownTimestampSeconds;
@@ -102,17 +103,15 @@ public final class AispectImpactSignalCollector {
             rollingFrames.clear();
             isRunning = sensorManager != null && accelerationSensor != null;
             activeSamplePeriodUs = 0;
-            sensorToUptimeOffsetSeconds = (SystemClock.uptimeMillis() / 1000.0) - (SystemClock.elapsedRealtimeNanos() / 1_000_000_000.0);
             lastSampleSensorNanos = 0L;
-            lastMagnitude = 0;
             averageSampleIntervalSeconds = 0;
-            hasBaseline = false;
             gyroX = 0;
             gyroY = 0;
             gyroZ = 0;
             gravityX = 0;
             gravityY = 0;
             gravityZ = 0;
+            gravitySensorTimestampNanos = 0L;
             touchXNorm = 0;
             touchYNorm = 0;
             touchDownTimestampSeconds = 0;
@@ -163,11 +162,22 @@ public final class AispectImpactSignalCollector {
         synchronized (lock) {
             double rate = averageSampleIntervalSeconds > 0 ? 1.0 / averageSampleIntervalSeconds : 0;
             String sensorName = accelerationSensor != null ? accelerationSensor.getName() : "unavailable";
-            return new Snapshot(new ArrayList<>(rollingFrames), rate, sensorName, gyroscopeSensor != null, gravitySensor != null);
+            String sensorSource = accelerationSensor != null && accelerationSensor.getType() == Sensor.TYPE_LINEAR_ACCELERATION
+                    ? "linear_acceleration"
+                    : "accelerometer_with_gravity";
+            return new Snapshot(
+                    new ArrayList<>(rollingFrames),
+                    rate,
+                    sensorName,
+                    sensorSource,
+                    gyroscopeSensor != null,
+                    gravitySensor != null
+            );
         }
     }
 
     private void handleSensorEvent(SensorEvent event) {
+        long receivedElapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos();
         int type = event.sensor.getType();
         synchronized (lock) {
             if (type == Sensor.TYPE_GYROSCOPE) {
@@ -180,6 +190,7 @@ public final class AispectImpactSignalCollector {
                 gravityX = event.values[0];
                 gravityY = event.values[1];
                 gravityZ = event.values[2];
+                gravitySensorTimestampNanos = event.timestamp;
                 return;
             }
             if (!isRunning || type != Sensor.TYPE_LINEAR_ACCELERATION && type != Sensor.TYPE_ACCELEROMETER) {
@@ -188,13 +199,24 @@ public final class AispectImpactSignalCollector {
             double x = event.values[0];
             double y = event.values[1];
             double z = event.values[2];
-            double magnitude = weightedMagnitude(x, y, z);
-            double signedDelta = 0;
-            if (hasBaseline) {
-                signedDelta = magnitude - lastMagnitude;
-            } else {
-                hasBaseline = true;
+            String source = type == Sensor.TYPE_LINEAR_ACCELERATION
+                    ? "linear_acceleration"
+                    : "accelerometer_with_gravity";
+            if ("accelerometer_with_gravity".equals(source)
+                    && !isGravityTimestampAligned(event.timestamp, gravitySensorTimestampNanos)) {
+                return;
             }
+            double[] linearAcceleration = linearAcceleration(
+                    new double[]{x, y, z},
+                    new double[]{gravityX, gravityY, gravityZ},
+                    source
+            );
+            if (linearAcceleration == null) {
+                return;
+            }
+            x = linearAcceleration[0];
+            y = linearAcceleration[1];
+            z = linearAcceleration[2];
             if (lastSampleSensorNanos > 0L) {
                 double interval = (event.timestamp - lastSampleSensorNanos) / 1_000_000_000.0;
                 if (interval > 0) {
@@ -204,11 +226,10 @@ public final class AispectImpactSignalCollector {
                 }
             }
             lastSampleSensorNanos = event.timestamp;
-            lastMagnitude = magnitude;
-            double timestampSeconds = event.timestamp / 1_000_000_000.0 + sensorToUptimeOffsetSeconds;
+            double timestampSeconds = event.timestamp / 1_000_000_000.0;
             double timeSinceTouchDown = touchDownTimestampSeconds > 0 ? timestampSeconds - touchDownTimestampSeconds : 0;
             rollingFrames.add(new AispectModels.ImpactFrame(
-                    signedDelta,
+                    0,
                     x,
                     y,
                     z,
@@ -222,7 +243,9 @@ public final class AispectImpactSignalCollector {
                     touchYNorm,
                     timeSinceTouchDown,
                     0,
-                    timestampSeconds
+                    timestampSeconds,
+                    event.timestamp,
+                    receivedElapsedRealtimeNanos
             ));
             if (rollingFrames.size() > Math.max(80, config.rollingFrameLimit)) {
                 rollingFrames.remove(0);
@@ -265,13 +288,6 @@ public final class AispectImpactSignalCollector {
         }
     }
 
-    private double weightedMagnitude(double x, double y, double z) {
-        double wx = Math.max(config.axisWeightX, 0.0);
-        double wy = Math.max(config.axisWeightY, 0.0);
-        double wz = Math.max(config.axisWeightZ, 0.0);
-        return Math.sqrt(wx * x * x + wy * y * y + wz * z * z);
-    }
-
     private static double clampUnit(double value) {
         if (value < 0) {
             return 0;
@@ -280,5 +296,30 @@ public final class AispectImpactSignalCollector {
             return 1;
         }
         return value;
+    }
+
+    static double[] linearAcceleration(double[] acceleration, double[] gravity, String source) {
+        if (acceleration == null || acceleration.length != 3 || source == null) {
+            return null;
+        }
+        if ("linear_acceleration".equals(source) || "user_acceleration".equals(source)) {
+            return acceleration.clone();
+        }
+        if (!"accelerometer_with_gravity".equals(source)
+                || gravity == null
+                || gravity.length != 3) {
+            return null;
+        }
+        return new double[]{
+                acceleration[0] - gravity[0],
+                acceleration[1] - gravity[1],
+                acceleration[2] - gravity[2]
+        };
+    }
+
+    static boolean isGravityTimestampAligned(long accelerationTimestampNanos, long gravityTimestampNanos) {
+        return accelerationTimestampNanos > 0L
+                && gravityTimestampNanos > 0L
+                && Math.abs(accelerationTimestampNanos - gravityTimestampNanos) <= 50_000_000L;
     }
 }

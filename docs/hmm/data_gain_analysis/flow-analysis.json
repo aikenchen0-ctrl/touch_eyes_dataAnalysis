@@ -1,0 +1,232 @@
+{
+  "artifact": "flow-analysis",
+  "analysisId": "existing-data-limited-gain-20260731",
+  "dependsOn": "function-field-model.json",
+  "flows": [
+    {
+      "id": "flow_physical_signal",
+      "kind": "physical_to_digital",
+      "path": [
+        "touch_intent",
+        "finger_force_and_posture",
+        "touchscreen_and_phone_body",
+        "touch_axes_and_imu",
+        "raw_json"
+      ],
+      "desiredOutput": "device-stable class evidence",
+      "defects": [
+        {
+          "type": "distortion",
+          "location": "touchscreen_and_phone_body_to_touch_axes_and_imu",
+          "effect": "device response is superimposed on class response"
+        },
+        {
+          "type": "uncontrolled_variation",
+          "location": "touch_intent_to_finger_force_and_posture",
+          "effect": "subjective labels overlap in physical behavior"
+        }
+      ]
+    },
+    {
+      "id": "flow_label_information",
+      "kind": "semantic_information",
+      "path": [
+        "collection_instruction",
+        "collector_interpretation",
+        "manual_label",
+        "training_target",
+        "model_output"
+      ],
+      "desiredOutput": "consistent four-class semantics",
+      "defects": [
+        {
+          "type": "missing_reference",
+          "location": "collector_interpretation_to_manual_label",
+          "effect": "light and heavy thresholds vary across people and sessions"
+        },
+        {
+          "type": "compression",
+          "location": "continuous_physical_behavior_to_four_discrete_labels",
+          "effect": "ambiguous boundary samples receive a forced discrete target"
+        }
+      ]
+    },
+    {
+      "id": "flow_independent_information",
+      "kind": "statistical_information",
+      "path": [
+        "raw_89385_rows",
+        "quality_processing",
+        "temporal_thinning",
+        "79878_training_rows",
+        "358_session_groups",
+        "model_updates"
+      ],
+      "desiredOutput": "effective sample size growth",
+      "defects": [
+        {
+          "type": "redundancy_overload",
+          "location": "training_rows_to_session_groups",
+          "effect": "row count grows much faster than independent behavioral contexts"
+        },
+        {
+          "type": "unequal_flow",
+          "location": "session_groups_to_model_updates",
+          "effect": "large collections can dominate optimization when group balancing is disabled"
+        }
+      ]
+    },
+    {
+      "id": "flow_domain_identity",
+      "kind": "harmful_information",
+      "path": [
+        "collector_and_device",
+        "sensor_scale_and_timing",
+        "feature_tensor",
+        "model_parameters",
+        "prediction"
+      ],
+      "desiredOutput": "domain identity blocked from class decision",
+      "defects": [
+        {
+          "type": "leakage",
+          "location": "sensor_scale_and_timing_to_feature_tensor",
+          "effect": "model can infer collection domain from inputs"
+        },
+        {
+          "type": "shortcut",
+          "location": "feature_tensor_to_prediction",
+          "effect": "domain-label correlation can substitute for a stable physical class boundary"
+        }
+      ]
+    },
+    {
+      "id": "flow_temporal_anchor",
+      "kind": "time_reference_information",
+      "path": [
+        "touch_event",
+        "anchor_selection",
+        "frame_index_assignment",
+        "training_window",
+        "runtime_trigger"
+      ],
+      "desiredOutput": "one explicit causal input contract per model",
+      "defects": [
+        {
+          "type": "semantic_mismatch",
+          "location": "anchor_selection",
+          "effect": "touch-end-anchored IMU, ACTION_DOWN single-frame, and proposed ACTION_DOWN-anchored IMU inputs may be conflated"
+        },
+        {
+          "type": "missing_path",
+          "location": "ACTION_DOWN_to_fixed_imu_window",
+          "effect": "the requested pre-roll and post-roll early IMU model is not currently produced"
+        }
+      ]
+    },
+    {
+      "id": "flow_validation_evidence",
+      "kind": "decision_information",
+      "path": [
+        "model_predictions",
+        "random_and_strict_metrics",
+        "candidate_ranking",
+        "deployment_decision"
+      ],
+      "desiredOutput": "deployment controlled by real-world generalization evidence",
+      "defects": [
+        {
+          "type": "priority_inversion",
+          "location": "random_and_strict_metrics_to_candidate_ranking",
+          "effect": "easier random metrics may outweigh stricter but more relevant evidence"
+        },
+        {
+          "type": "weak_gate",
+          "location": "candidate_ranking_to_deployment_decision",
+          "effect": "strict holdout failure does not consistently block deployment"
+        }
+      ]
+    },
+    {
+      "id": "flow_runtime_equivalence",
+      "kind": "implementation_information",
+      "path": [
+        "python_feature_contract",
+        "exported_scaler_and_weights",
+        "android_feature_reconstruction",
+        "phone_prediction"
+      ],
+      "desiredOutput": "numerically equivalent offline and Android inputs",
+      "defects": [
+        {
+          "type": "unverified_transfer",
+          "location": "python_feature_contract_to_android_feature_reconstruction",
+          "effect": "model error and runtime preprocessing error cannot yet be separated conclusively"
+        }
+      ]
+    },
+    {
+      "id": "flow_real_world_feedback",
+      "kind": "feedback_information",
+      "path": [
+        "phone_trial",
+        "observed_prediction",
+        "user_judgment",
+        "training_revision"
+      ],
+      "desiredOutput": "attributable error records",
+      "defects": [
+        {
+          "type": "information_loss",
+          "location": "user_judgment_to_training_revision",
+          "effect": "subjective summary lacks model, class, confidence, timing, and device context"
+        }
+      ]
+    }
+  ],
+  "bottleneckRanking": [
+    {
+      "rank": 1,
+      "flowId": "flow_domain_identity",
+      "evidenceStrength": "high",
+      "reason": "large random-versus-collection holdout gap directly indicates unstable domain transfer"
+    },
+    {
+      "rank": 2,
+      "flowId": "flow_independent_information",
+      "evidenceStrength": "high",
+      "reason": "79878 rows collapse into 358 session groups and additional rows did not improve validation"
+    },
+    {
+      "rank": 3,
+      "flowId": "flow_validation_evidence",
+      "evidenceStrength": "high",
+      "reason": "strict metrics exist but final pooled selection remained tied to random-holdout experiments"
+    },
+    {
+      "rank": 4,
+      "flowId": "flow_label_information",
+      "evidenceStrength": "medium",
+      "reason": "manual strength labels have no objective force reference, but disagreement rate is not yet measured"
+    },
+    {
+      "rank": 5,
+      "flowId": "flow_temporal_anchor",
+      "evidenceStrength": "high",
+      "reason": "code inspection confirms the current early model and final model use different anchors and inputs"
+    },
+    {
+      "rank": 6,
+      "flowId": "flow_runtime_equivalence",
+      "evidenceStrength": "low_unverified",
+      "reason": "unit tests exist, but no captured sample has been compared end to end across Python and Android"
+    },
+    {
+      "rank": 7,
+      "flowId": "flow_real_world_feedback",
+      "evidenceStrength": "medium",
+      "reason": "real phone feedback exists but is not recorded as attributable per-trial evidence"
+    }
+  ],
+  "currentConclusion": "additional rows enter the pipeline successfully, but independent class information is diluted by domain variation and is evaluated through inconsistent evidence paths before reaching the phone"
+}

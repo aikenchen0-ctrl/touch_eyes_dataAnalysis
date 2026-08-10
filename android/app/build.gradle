@@ -6,12 +6,30 @@ android {
     namespace "com.zhifaios.eyes.android"
     compileSdk 34
 
+    buildFeatures {
+        buildConfig true
+    }
+
     defaultConfig {
         applicationId "com.zhifaios.eyes.android"
         minSdk 24
         targetSdk 34
         versionCode 1
         versionName "1.0"
+        buildConfigField "String", "DEFAULT_MODEL_ID", '"oneplus_four_class_after_recollect_hard_nearfull_weighted_old13_multichannel"'
+    }
+
+    flavorDimensions "model"
+    productFlavors {
+        standard {
+            dimension "model"
+        }
+        crossDevice {
+            dimension "model"
+            applicationIdSuffix ".crossdevice"
+            versionNameSuffix "-cross-device"
+            buildConfigField "String", "DEFAULT_MODEL_ID", '"full_data_clean_v2_old13_all_118"'
+        }
     }
 }
 

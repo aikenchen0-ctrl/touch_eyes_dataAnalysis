@@ -31,8 +31,9 @@ def main():
 
     valid_records = [record for record in records if record.get("load_ok")]
     class_stats = build_class_stats(valid_records)
+    context_stats = build_context_stats(valid_records)
     for record in valid_records:
-        apply_quality_decision(record, class_stats)
+        apply_quality_decision(record, class_stats, context_stats)
     for record in records:
         if not record.get("load_ok"):
             record["quality_bucket"] = REJECT_DIR
@@ -40,11 +41,13 @@ def main():
             record["quality_reasons"] = "json_load_failed"
 
     selected_records = [record for record in records if record.get("quality_bucket") == KEEP_DIR]
+    weighted_records = select_weighted_records(records)
     balanced_records = balance_records(selected_records, args.max_per_class)
     write_manifest(output_dir / "manifest.csv", records)
     write_manifest(output_dir / "train_manifest.csv", selected_records)
+    write_manifest(output_dir / "weighted_train_manifest.csv", weighted_records)
     write_manifest(output_dir / "balanced_train_manifest.csv", balanced_records)
-    write_summary(output_dir / "summary.json", records, selected_records, balanced_records)
+    write_summary(output_dir / "summary.json", records, selected_records, weighted_records, balanced_records)
     if args.copy_files:
         copy_grouped_files(output_dir, records)
 
@@ -102,6 +105,7 @@ def read_record(path):
         "touch_frame_count": len(touch_frames),
         "max_abs_delta": finite_float(data.get("maxAbsDelta"), 0),
         "device_level": str(capability.get("level") or ""),
+        "device_name": str(capability.get("deviceName") or "unknown"),
         "has_major": bool(capability.get("hasMajor")),
         "has_minor": bool(capability.get("hasMinor")),
         "touch_norm_valid": bool(selected_norm.get("valid")),
@@ -170,7 +174,47 @@ def build_class_stats(records):
     return stats
 
 
-def apply_quality_decision(record, class_stats):
+def build_context_stats(records):
+    values = defaultdict(lambda: defaultdict(list))
+    for record in records:
+        key = quality_context_key(record)
+        for field in ("max_abs_delta", "path_travel_px"):
+            value = finite_float(record.get(field), None)
+            if value is not None:
+                values[key][field].append(value)
+
+    stats = {}
+    for key, fields in values.items():
+        stats[key] = {}
+        for field, items in fields.items():
+            median = percentile(items, 0.50)
+            deviations = [abs(item - median) for item in items]
+            stats[key][field] = {
+                "p25": percentile(items, 0.25),
+                "p50": median,
+                "p75": percentile(items, 0.75),
+                "p95": percentile(items, 0.95),
+                "mad": percentile(deviations, 0.50),
+            }
+    return stats
+
+
+def quality_context_key(record):
+    return str(record.get("device_name") or "unknown") + ":" + str(record.get("motion_state") or "unknown")
+
+
+def context_upper_limit(record, context_stats, field, absolute_floor):
+    field_stats = context_stats.get(quality_context_key(record), {}).get(field, {})
+    median = finite_float(field_stats.get("p50"), 0) or 0
+    mad = finite_float(field_stats.get("mad"), 0) or 0
+    p95 = finite_float(field_stats.get("p95"), 0) or 0
+    robust_limit = median + 8.0 * mad
+    quantile_limit = p95 * 1.25
+    return max(float(absolute_floor), robust_limit, quantile_limit)
+
+
+def apply_quality_decision(record, class_stats, context_stats=None):
+    context_stats = context_stats or {}
     reasons = []
     warnings = []
     score = 100
@@ -199,7 +243,8 @@ def apply_quality_decision(record, class_stats):
     if record["source_touch_kind"] in ("dragStart", "drag", "dragEnd", "cancel"):
         reasons.append("drag_or_cancel")
         score -= 70
-    if record["path_travel_px"] > 36:
+    travel_limit = context_upper_limit(record, context_stats, "path_travel_px", 36.0)
+    if record["path_travel_px"] > travel_limit:
         reasons.append("large_touch_travel")
         score -= 25
     if record["touch_frame_count"] < 2:
@@ -220,7 +265,8 @@ def apply_quality_decision(record, class_stats):
     if record["max_abs_delta"] <= 0:
         reasons.append("missing_impact_delta")
         score -= 30
-    if record["max_abs_delta"] > 5.0:
+    impact_limit = context_upper_limit(record, context_stats, "max_abs_delta", 5.0)
+    if record["max_abs_delta"] > impact_limit:
         reasons.append("impact_outlier_high")
         score -= 25
 
@@ -254,6 +300,16 @@ def apply_quality_decision(record, class_stats):
     record["quality_reasons"] = "|".join(reasons) if reasons else "clean"
     record["quality_warnings"] = "|".join(warnings) if warnings else ""
     record["sample_weight"] = sample_weight_for_record(record, class_stats)
+
+
+def select_weighted_records(records):
+    selected = []
+    for record in records:
+        if record.get("quality_bucket") not in (KEEP_DIR, REVIEW_DIR):
+            continue
+        record["sample_weight"] = sample_weight_for_record(record, {})
+        selected.append(record)
+    return selected
 
 
 def label_conflict_reason(record, class_stats):
@@ -336,22 +392,13 @@ def balance_records(records, max_per_class):
 
 
 def sample_weight_for_record(record, class_stats):
-    weight = 1.0
-    if record.get("quality_bucket") != KEEP_DIR:
-        return weight
+    bucket = record.get("quality_bucket")
+    if bucket == REJECT_DIR:
+        return 0.0
+    weight = 1.0 if bucket == KEEP_DIR else 0.35
     reasons = set(str(record.get("quality_reasons") or "").split("|"))
-    warnings = set(str(record.get("quality_warnings") or "").split("|"))
-    if "light_label_heavy_shape" in reasons or "light_label_heavy_shape" in warnings:
-        weight *= 2.5
-    if "heavy_label_light_shape" in reasons or "heavy_label_light_shape" in warnings:
-        weight *= 1.5
-    light_major_p90 = get_stat(class_stats.get("light", {}), "max_touch_major", "p90")
-    major = finite_float(record.get("max_touch_major"), 0)
-    large_light_major = major > 18
-    if light_major_p90 > 0:
-        large_light_major = large_light_major or major >= light_major_p90
-    if record.get("touch_strength") == "light" and large_light_major:
-        weight *= 3.0
+    if "light_label_heavy_shape" in reasons or "heavy_label_light_shape" in reasons:
+        weight *= 0.5
     return round(weight, 4)
 
 
@@ -372,6 +419,7 @@ def write_manifest(path, records):
         "created_at",
         "source_touch_kind",
         "device_level",
+        "device_name",
         "sample_rate_hz",
         "motion_frame_count",
         "window_frame_count",
@@ -405,10 +453,11 @@ def write_manifest(path, records):
             writer.writerow({field: record.get(field, "") for field in fields})
 
 
-def write_summary(path, records, selected_records, balanced_records):
+def write_summary(path, records, selected_records, weighted_records, balanced_records):
     bucket_counts = Counter(record.get("quality_bucket", "unknown") for record in records)
     label_counts = Counter(record.get("label_id", "unknown") for record in records)
     selected_label_counts = Counter(record.get("label_id", "unknown") for record in selected_records)
+    weighted_label_counts = Counter(record.get("label_id", "unknown") for record in weighted_records)
     balanced_label_counts = Counter(record.get("label_id", "unknown") for record in balanced_records)
     reason_counts = Counter()
     warning_counts = Counter()
@@ -422,10 +471,12 @@ def write_summary(path, records, selected_records, balanced_records):
     summary = {
         "total": len(records),
         "selectedForTraining": len(selected_records),
+        "weightedForTraining": len(weighted_records),
         "balancedForTraining": len(balanced_records),
         "bucketCounts": dict(sorted(bucket_counts.items())),
         "labelCounts": dict(sorted(label_counts.items())),
         "selectedLabelCounts": dict(sorted(selected_label_counts.items())),
+        "weightedLabelCounts": dict(sorted(weighted_label_counts.items())),
         "balancedLabelCounts": dict(sorted(balanced_label_counts.items())),
         "reasonCounts": dict(reason_counts.most_common()),
         "warningCounts": dict(warning_counts.most_common()),

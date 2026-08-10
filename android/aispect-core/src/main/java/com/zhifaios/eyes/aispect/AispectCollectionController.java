@@ -1,8 +1,10 @@
 package com.zhifaios.eyes.aispect;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.MotionEvent;
 
 import org.json.JSONException;
@@ -14,6 +16,8 @@ import java.util.Locale;
 import java.util.UUID;
 
 public final class AispectCollectionController {
+    private static final String IDENTITY_PREFERENCES = "aispect_collector_identity";
+    private static final String DEVICE_ID_KEY = "device_id";
     public interface Listener {
         void onStatusChanged(Status status);
 
@@ -23,8 +27,10 @@ public final class AispectCollectionController {
     }
 
     public static final class Config {
-        public long postTouchCaptureDelayMs = 140L;
-        public boolean enableCnnDiagnostics = true;
+        public long postTouchCaptureDelayMs = 85L;
+        public long postTouchCapturePollIntervalMs = 8L;
+        public long postTouchCaptureTimeoutMs = 500L;
+        public boolean enableCnnDiagnostics = false;
     }
 
     public static final class Status {
@@ -101,6 +107,7 @@ public final class AispectCollectionController {
     private final AispectSignalWindowBuilder windowBuilder = new AispectSignalWindowBuilder();
     private final AispectDataLogger dataLogger;
     private final AispectImpactCNNClassifier classifier;
+    private final AispectDownAnchorWindowGate downWindowGate = new AispectDownAnchorWindowGate();
     private final AispectDeviceCapabilityProfiler capabilityProfiler = new AispectDeviceCapabilityProfiler();
     private final AispectTouchNormalizationEngine normalizationEngine = new AispectTouchNormalizationEngine();
     private final ArrayList<AispectTouchFrame> activeTouchFrames = new ArrayList<>();
@@ -114,6 +121,9 @@ public final class AispectCollectionController {
     private boolean activeShouldSaveSample = true;
     private String selectedModelId;
     private String activeModelId;
+    private String selectedUserName = "";
+    private AispectModels.CollectorIdentity activeCollectorIdentity;
+    private final String deviceId;
     private AispectTouchNormalizationProfile.Scheme activeNormalizationScheme = AispectTouchNormalizationProfile.Scheme.COVARIANCE_MATRIX;
     private AispectContactEncodingProfile.Scheme selectedContactEncodingScheme = AispectContactEncodingProfile.Scheme.GAUSSIAN_MAP;
     private AispectContactEncodingProfile.Scheme activeContactEncodingScheme = AispectContactEncodingProfile.Scheme.GAUSSIAN_MAP;
@@ -122,6 +132,10 @@ public final class AispectCollectionController {
     private long collectionSessionStartedAtMillis;
     private String collectionSessionId = UUID.randomUUID().toString();
     private long downEventTimeMillis;
+    private long downEventElapsedRealtimeNanos;
+    private long downReceivedElapsedRealtimeNanos;
+    private long liftEventElapsedRealtimeNanos;
+    private long liftReceivedElapsedRealtimeNanos;
     private double downTimestampSeconds;
     private int activeTouchSequence;
     private AispectModels.TouchEvent endingEvent;
@@ -133,10 +147,18 @@ public final class AispectCollectionController {
     private AispectTouchNormalizationProfile latestNormalizationProfile;
     private AispectContactEncodingProfile latestContactEncodingProfile;
     private int latestPredictionSequence;
+    private Runnable downWindowPoll;
     private String lastEventKey = "collector_idle";
     private String lastEventDetail;
 
     public AispectCollectionController(Context context) {
+        SharedPreferences preferences = context.getSharedPreferences(IDENTITY_PREFERENCES, Context.MODE_PRIVATE);
+        String storedDeviceId = preferences.getString(DEVICE_ID_KEY, "");
+        if (storedDeviceId == null || storedDeviceId.isEmpty()) {
+            storedDeviceId = UUID.randomUUID().toString();
+            preferences.edit().putString(DEVICE_ID_KEY, storedDeviceId).apply();
+        }
+        deviceId = storedDeviceId;
         dataLogger = new AispectDataLogger(context);
         classifier = new AispectImpactCNNClassifier(context);
         AispectImpactCNNClassifier.ModelInfo defaultModel = classifier.defaultModelInfo();
@@ -149,6 +171,8 @@ public final class AispectCollectionController {
             activeEvents.add(event);
             handleAispectEvent(event);
         });
+        // 中文注释：验证模式需要按下前的滚动缓存，因此控制器创建后即预热 IMU。
+        signalCollector.start();
     }
 
     public Config config() {
@@ -169,6 +193,10 @@ public final class AispectCollectionController {
 
     public AispectImpactCNNClassifier.ModelInfo selectedModelInfo() {
         return classifier.modelInfoForId(selectedModelId);
+    }
+
+    public String firstTouchModelId() {
+        return "down_anchor_pre5_post9_v1_pending";
     }
 
     public AispectTouchNormalizationProfile.Scheme selectedNormalizationScheme() {
@@ -235,29 +263,59 @@ public final class AispectCollectionController {
         return selectedLabel;
     }
 
+    public void setCollectorUserName(String userName) {
+        if (enabled || activeTouch) {
+            return;
+        }
+        selectedUserName = AispectModels.CollectorIdentity.normalizeUserName(userName);
+    }
+
+    public String collectorUserName() {
+        return selectedUserName;
+    }
+
+    public boolean canStartCollection() {
+        return AispectModels.CollectorIdentity.isValidUserName(selectedUserName);
+    }
+
     public void setEnabled(boolean enabled) {
+        if (enabled && !canStartCollection()) {
+            return;
+        }
         this.enabled = enabled;
         clearLatestPredictionSnapshot();
         if (enabled) {
             acceptedCount = 0;
             rejectedCount = 0;
+            cancelDownWindowPoll();
+            downWindowGate.reset();
             collectionSessionStartedAtMillis = System.currentTimeMillis();
             collectionSessionId = UUID.randomUUID().toString();
+            activeCollectorIdentity = new AispectModels.CollectorIdentity(selectedUserName, deviceId);
             normalizationEngine.resetBaseline();
             signalCollector.start();
             lastEventKey = "collector_session_ready";
             lastEventDetail = selectedLabel.datasetKey();
         } else {
+            activeCollectorIdentity = null;
             activeTouch = false;
             activeSaveScheduled = false;
+            cancelDownWindowPoll();
+            downWindowGate.reset();
             activeTouchFrames.clear();
             activeEvents.clear();
             endingEvent = null;
-            signalCollector.stop();
             lastEventKey = "collector_session_stopped";
             lastEventDetail = null;
         }
         emitStatus();
+    }
+
+    public void shutdown() {
+        cancelDownWindowPoll();
+        downWindowGate.reset();
+        activeTouch = false;
+        signalCollector.stop();
     }
 
     public boolean isEnabled() {
@@ -294,6 +352,8 @@ public final class AispectCollectionController {
     private void collectTouchFrames(MotionEvent event, int width, int height) {
         int action = event.getActionMasked();
         int pointerIndex = Math.max(0, event.getActionIndex());
+        long receivedUptimeMillis = SystemClock.uptimeMillis();
+        long receivedElapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos();
         if (action == MotionEvent.ACTION_DOWN) {
             activeTouch = true;
             activeSaveScheduled = false;
@@ -305,13 +365,23 @@ public final class AispectCollectionController {
             endingEvent = null;
             clearLatestPredictionSnapshot();
             downEventTimeMillis = event.getDownTime();
-            downTimestampSeconds = downEventTimeMillis / 1000.0;
+            downEventElapsedRealtimeNanos = AispectCaptureClock.uptimeMillisToElapsedRealtimeNanos(
+                    downEventTimeMillis,
+                    receivedUptimeMillis,
+                    receivedElapsedRealtimeNanos
+            );
+            downReceivedElapsedRealtimeNanos = receivedElapsedRealtimeNanos;
+            liftEventElapsedRealtimeNanos = 0L;
+            liftReceivedElapsedRealtimeNanos = 0L;
+            downTimestampSeconds = downEventElapsedRealtimeNanos / 1_000_000_000.0;
             activeModelId = selectedModelId;
             activeNormalizationScheme = normalizationEngine.selectedScheme();
             activeContactEncodingScheme = selectedContactEncodingScheme;
-            lastEventKey = activeShouldSaveSample ? "collector_waiting_for_touch_end" : "collector_diagnostic_waiting";
+            downWindowGate.begin();
+            lastEventKey = activeShouldSaveSample ? "collector_down_window_waiting" : "collector_diagnostic_down_window_waiting";
             lastEventDetail = activeLabel.datasetKey();
             signalCollector.updateTouchContext(unit(event.getX(), width), unit(event.getY(), height), downTimestampSeconds);
+            scheduleDownWindowCheck(activeTouchSequence);
             emitStatus();
         }
         if (!activeTouch) {
@@ -319,15 +389,129 @@ public final class AispectCollectionController {
         }
         int safePointerIndex = Math.min(pointerIndex, event.getPointerCount() - 1);
         for (int i = 0; i < event.getHistorySize(); i++) {
-            AispectTouchFrame frame = AispectTouchFrame.fromHistorical(event, safePointerIndex, i, downEventTimeMillis, width, height);
+            AispectTouchFrame frame = AispectTouchFrame.fromHistorical(
+                    event,
+                    safePointerIndex,
+                    i,
+                    downEventTimeMillis,
+                    width,
+                    height,
+                    receivedUptimeMillis,
+                    receivedElapsedRealtimeNanos
+            );
             activeTouchFrames.add(frame);
             capabilityProfiler.observe(frame);
             signalCollector.updateTouchContext(frame.xNorm, frame.yNorm, downTimestampSeconds);
         }
-        AispectTouchFrame current = AispectTouchFrame.fromCurrent(event, safePointerIndex, downEventTimeMillis, width, height);
+        AispectTouchFrame current = AispectTouchFrame.fromCurrent(
+                event,
+                safePointerIndex,
+                downEventTimeMillis,
+                width,
+                height,
+                receivedUptimeMillis,
+                receivedElapsedRealtimeNanos
+        );
         activeTouchFrames.add(current);
         capabilityProfiler.observe(current);
         signalCollector.updateTouchContext(current.xNorm, current.yNorm, downTimestampSeconds);
+        if (action == MotionEvent.ACTION_UP
+                || action == MotionEvent.ACTION_CANCEL
+                || action == MotionEvent.ACTION_POINTER_UP) {
+            liftEventElapsedRealtimeNanos = current.eventElapsedRealtimeNanos;
+            liftReceivedElapsedRealtimeNanos = current.receivedElapsedRealtimeNanos;
+        }
+    }
+
+    /** 中文注释：按下后轮询传感器滚动缓存，等待真实 +9 帧后只发布一次窗口就绪状态。 */
+    private void scheduleDownWindowCheck(final int sequence) {
+        cancelDownWindowPoll();
+        Runnable poll = new Runnable() {
+            @Override
+            public void run() {
+                if (!activeTouch || activeTouchSequence != sequence) {
+                    return;
+                }
+                AispectImpactSignalCollector.Snapshot snapshot = signalCollector.snapshot();
+                AispectImpactCNNClassifier.ModelInfo activeModel = classifier.modelInfoForId(activeModelId);
+                if (activeModel != null
+                        && AispectCausalPressFeatureBuilder.isTimeGridFeatureContract(activeModel.featureContract)
+                        && liftEventElapsedRealtimeNanos > 0L
+                        && liftEventElapsedRealtimeNanos
+                        < downEventElapsedRealtimeNanos + 25_000_000L) {
+                    downWindowGate.reset();
+                    downWindowPoll = null;
+                    latestPrediction = null;
+                    latestPredictionSequence = sequence;
+                    lastEventKey = "collector_down_window_rejected_lift_before_endpoint";
+                    lastEventDetail = activeLabel.datasetKey();
+                    emitStatus();
+                    return;
+                }
+                boolean timeGridModel = activeModel != null
+                        && AispectCausalPressFeatureBuilder.isTimeGridFeatureContract(activeModel.featureContract);
+                boolean hasTimeGridSupport = !timeGridModel || AispectCausalPressFeatureBuilder.hasTimeGridSupport(
+                        snapshot.frames.toArray(new AispectModels.ImpactFrame[0]),
+                        downEventElapsedRealtimeNanos
+                );
+                if (!hasTimeGridSupport) {
+                    handler.postDelayed(this, 8L);
+                    return;
+                }
+                AispectSignalWindowBuilder.Window window = windowBuilder.buildDownAnchor(
+                        snapshot.frames,
+                        downTimestampSeconds,
+                        snapshot.sampleRateHz
+                );
+                if (downWindowGate.tryPublish(window)) {
+                    if (activeModel != null && AispectImpactCNNClassifier.usesCausalPressFeatureContract(activeModel.featureContract)) {
+                        AispectSignalWindowBuilder.Window predictionWindow = timeGridModel
+                                ? new AispectSignalWindowBuilder.Window(
+                                snapshot.frames.toArray(new AispectModels.ImpactFrame[0]),
+                                0,
+                                downTimestampSeconds,
+                                snapshot.sampleRateHz,
+                                0.0
+                        )
+                                : window;
+                        latestPrediction = classifier.predict(predictionWindow, activeModelId, new ArrayList<>(activeTouchFrames));
+                    } else {
+                        latestPrediction = null;
+                    }
+                    latestPredictionSequence = sequence;
+                    latestSampleRateHz = snapshot.sampleRateHz;
+                    latestImpactMaxAbsDelta = 0;
+                    latestImpactLog = downWindowReadyLog(window);
+                    lastEventKey = latestPrediction == null
+                            ? "collector_down_window_ready_model_pending"
+                            : "collector_down_window_ready_causal_prediction";
+                    lastEventDetail = activeLabel.datasetKey();
+                    emitStatus();
+                    downWindowPoll = null;
+                    return;
+                }
+                handler.postDelayed(this, 8L);
+            }
+        };
+        downWindowPoll = poll;
+        handler.post(poll);
+    }
+
+    private void cancelDownWindowPoll() {
+        if (downWindowPoll != null) {
+            handler.removeCallbacks(downWindowPoll);
+            downWindowPoll = null;
+        }
+    }
+
+    private static String downWindowReadyLog(AispectSignalWindowBuilder.Window window) {
+        return String.format(
+                Locale.US,
+                "down anchor window ready [%+d...%+d] frames %d; new model pending",
+                window.firstFrameIndex,
+                window.lastFrameIndex,
+                window.frames.length
+        );
     }
 
     private void handleAispectEvent(AispectModels.TouchEvent event) {
@@ -354,7 +538,7 @@ public final class AispectCollectionController {
                 lastEventKey = "collector_collecting_postroll";
                 lastEventDetail = endingEvent.kind.key();
                 emitStatus();
-                handler.postDelayed(() -> finalizeCompletedTouch(sequence), Math.max(0L, config.postTouchCaptureDelayMs));
+                schedulePostLiftFinalize(sequence, config.postTouchCaptureDelayMs);
                 break;
             case DRAG_END:
             case CANCEL:
@@ -377,7 +561,7 @@ public final class AispectCollectionController {
                 lastEventKey = "collector_collecting_postroll";
                 lastEventDetail = endingEvent.kind.key();
                 emitStatus();
-                handler.postDelayed(() -> finalizeCompletedTouch(dragSequence), Math.max(0L, config.postTouchCaptureDelayMs));
+                schedulePostLiftFinalize(dragSequence, config.postTouchCaptureDelayMs);
                 break;
             default:
                 break;
@@ -391,40 +575,70 @@ public final class AispectCollectionController {
         return AispectModels.TouchKind.LIGHT_TAP;
     }
 
+    private void schedulePostLiftFinalize(int sequence, long delayMs) {
+        handler.postDelayed(
+                () -> finalizeCompletedTouch(sequence),
+                Math.max(0L, delayMs)
+        );
+    }
+
     private void finalizeCompletedTouch(int sequence) {
         if (!activeTouch || endingEvent == null || activeTouchSequence != sequence) {
             return;
         }
-        activeTouch = false;
         AispectImpactSignalCollector.Snapshot signalSnapshot = signalCollector.snapshot();
-        AispectSignalWindowBuilder.Window impactWindow = windowBuilder.build(signalSnapshot.frames, endingEvent.timestampSeconds, signalSnapshot.sampleRateHz);
+        AispectSignalWindowBuilder.Window captureWindow = windowBuilder.buildDualAnchor(
+                signalSnapshot.frames,
+                downTimestampSeconds,
+                liftEventElapsedRealtimeNanos > 0L
+                        ? liftEventElapsedRealtimeNanos / 1_000_000_000.0
+                        : endingEvent.timestampSeconds,
+                signalSnapshot.sampleRateHz
+        );
+        long elapsedSinceLiftMs = liftReceivedElapsedRealtimeNanos > 0L
+                ? Math.max(
+                0L,
+                (SystemClock.elapsedRealtimeNanos() - liftReceivedElapsedRealtimeNanos) / 1_000_000L
+        )
+                : config.postTouchCaptureTimeoutMs;
+        if (AispectPostLiftCaptureGate.shouldWait(
+                captureWindow,
+                elapsedSinceLiftMs,
+                config.postTouchCaptureTimeoutMs
+        )) {
+            lastEventKey = "collector_waiting_post_lift_margin";
+            lastEventDetail = String.format(
+                    Locale.US,
+                    "%.1fms/%d frames",
+                    captureWindow.actualPostLiftDurationSeconds * 1000.0,
+                    Math.max(0, captureWindow.lastFrameIndex - captureWindow.liftReferenceFrameIndex)
+            );
+            emitStatus();
+            schedulePostLiftFinalize(sequence, config.postTouchCapturePollIntervalMs);
+            return;
+        }
+        activeTouch = false;
+        cancelDownWindowPoll();
         AispectDeviceCapabilityProfiler.Snapshot capability = capabilityProfiler.snapshot();
         AispectContactPatch patch = AispectContactPatch.fromFrames(new ArrayList<>(activeTouchFrames));
         latestNormalizationProfile = normalizationEngine.evaluate(new ArrayList<>(activeTouchFrames), patch);
         latestContactEncodingProfile = AispectContactEncodingProfile.evaluate(new ArrayList<>(activeTouchFrames), patch, activeContactEncodingScheme);
-        AispectModels.ImpactPrediction prediction = null;
-        if (config.enableCnnDiagnostics) {
-            prediction = classifier.predict(impactWindow, activeModelId, patch, latestNormalizationProfile, latestContactEncodingProfile);
-            if (prediction == null) {
-                prediction = classifier.predictBest(impactWindow, capability, patch, latestNormalizationProfile, latestContactEncodingProfile);
-            }
-            if (prediction != null && prediction.predictedProbability >= 0.5 && "heavy".equals(prediction.predictedLabel) && !prediction.isHeavy(impactWindow, patch, latestNormalizationProfile)) {
-                prediction = downgradePrediction(prediction);
-            }
-        }
-        latestPrediction = prediction;
-        latestPredictionSequence = sequence;
         latestSampleRateHz = signalSnapshot.sampleRateHz;
-        latestImpactMaxAbsDelta = impactWindow.maxAbsDelta;
-        latestImpactLog = impactWindowLog(impactWindow, prediction, latestNormalizationProfile);
+        latestImpactMaxAbsDelta = 0;
+        latestImpactLog = String.format(
+                Locale.US,
+                "raw down/lift window [%+d...%+d] frames %d; down-anchor model pending",
+                captureWindow.firstFrameIndex,
+                captureWindow.lastFrameIndex,
+                captureWindow.frames.length
+        );
         if (!activeShouldSaveSample) {
-            lastEventKey = "collector_diagnostic_ready";
+            lastEventKey = "collector_diagnostic_ready_model_pending";
             lastEventDetail = activeLabel.datasetKey();
             activeSaveScheduled = false;
             activeTouchFrames.clear();
             activeEvents.clear();
             endingEvent = null;
-            signalCollector.stop();
             emitStatus();
             return;
         }
@@ -434,8 +648,13 @@ public final class AispectCollectionController {
                     System.currentTimeMillis(),
                     collectionSessionId,
                     collectionSessionStartedAtMillis,
+                    downEventElapsedRealtimeNanos,
+                    downReceivedElapsedRealtimeNanos,
+                    liftEventElapsedRealtimeNanos,
+                    liftReceivedElapsedRealtimeNanos,
                     "accepted",
                     "",
+                    activeCollectorIdentity,
                     activeLabel,
                     endingEvent.kind.key(),
                     endingEvent.liftOffset,
@@ -443,7 +662,7 @@ public final class AispectCollectionController {
                     new ArrayList<>(activeTouchFrames),
                     patch,
                     latestContactEncodingProfile,
-                    impactWindow,
+                    captureWindow,
                     capability,
                     latestNormalizationProfile,
                     null,
@@ -470,6 +689,7 @@ public final class AispectCollectionController {
         } finally {
             activeSaveScheduled = false;
             activeShouldSaveSample = true;
+            downWindowGate.reset();
             activeTouchFrames.clear();
             activeEvents.clear();
             endingEvent = null;
@@ -515,70 +735,6 @@ public final class AispectCollectionController {
                 latestContactEncodingProfile,
                 latestPredictionSequence
         );
-    }
-
-    private static String impactWindowLog(
-            AispectSignalWindowBuilder.Window window,
-            AispectModels.ImpactPrediction prediction,
-            AispectTouchNormalizationProfile normalizationProfile
-    ) {
-        StringBuilder builder = new StringBuilder();
-        if (prediction == null) {
-            builder.append(String.format(Locale.US, "impact delta window max %.4f cnn unavailable", window.maxAbsDelta));
-        } else {
-            builder.append(String.format(
-                    Locale.US,
-                    "impact delta window max %.4f decision %s %.4f heavy %.4f light %.4f",
-                    window.maxAbsDelta,
-                    prediction.predictedLabel,
-                    prediction.predictedProbability,
-                    prediction.heavyProbability,
-                    prediction.lightProbability
-            ));
-        }
-        if (normalizationProfile != null) {
-            builder.append('\n');
-            builder.append(String.format(
-                    Locale.US,
-                    "touch norm %s major %.5f minor %.5f area %.5f conf %.2f",
-                    normalizationProfile.selectedScheme.key(),
-                    normalizationProfile.selectedResult.majorValue,
-                    normalizationProfile.selectedResult.minorValue,
-                    normalizationProfile.selectedResult.areaValue,
-                    normalizationProfile.selectedResult.confidence
-            ));
-        }
-        for (int i = 0; i < window.frames.length; i++) {
-            AispectModels.ImpactFrame frame = window.frames[i];
-            int frameIndex = window.firstFrameIndex + i;
-            builder.append('\n');
-            builder.append(String.format(
-                    Locale.US,
-                    "f%+d d%+.4f x%+.4f y%+.4f z%+.4f m%+.4f",
-                    frameIndex,
-                    frame.delta,
-                    frame.x,
-                    frame.y,
-                    frame.z,
-                    Math.abs(frame.delta)
-            ));
-        }
-        return builder.toString();
-    }
-
-    private static AispectModels.ImpactPrediction downgradePrediction(AispectModels.ImpactPrediction prediction) {
-        if (prediction == null || prediction.probabilities.length != 2 || prediction.labelOrder.length != 2) {
-            return prediction;
-        }
-        double heavy = Math.min(prediction.heavyProbability, prediction.lightProbability * 0.7);
-        double light = Math.max(prediction.lightProbability, 1e-6);
-        double total = heavy + light;
-        if (total <= 0) {
-            return prediction;
-        }
-        heavy /= total;
-        light /= total;
-        return new AispectModels.ImpactPrediction(new double[]{heavy, light}, new String[]{"heavy", "light"}, prediction.modelId);
     }
 
     private static double unit(float value, int denominator) {

@@ -1,0 +1,17 @@
+index,english_key,chinese_name,english_name,category_zh,category_en,description_zh,description_en,unit_or_type
+1,x_norm,归一化屏幕X坐标,Normalized screen X coordinate,位置与时间,Position and time,触摸点横坐标除以界面宽度后的无量纲坐标,Dimensionless touch horizontal coordinate normalized by view width,ratio
+2,y_norm,归一化屏幕Y坐标,Normalized screen Y coordinate,位置与时间,Position and time,触摸点纵坐标除以界面高度后的无量纲坐标,Dimensionless touch vertical coordinate normalized by view height,ratio
+3,userAcceleration.x,用户加速度X轴,User acceleration X axis,惯性测量单元,Inertial measurement unit,去除重力后的设备线性加速度X分量,Device linear acceleration X component with gravity removed,IMU axis
+4,userAcceleration.y,用户加速度Y轴,User acceleration Y axis,惯性测量单元,Inertial measurement unit,去除重力后的设备线性加速度Y分量,Device linear acceleration Y component with gravity removed,IMU axis
+5,userAcceleration.z,用户加速度Z轴,User acceleration Z axis,惯性测量单元,Inertial measurement unit,去除重力后的设备线性加速度Z分量,Device linear acceleration Z component with gravity removed,IMU axis
+6,rotationRate.x,旋转速率X轴,Rotation rate X axis,惯性测量单元,Inertial measurement unit,设备绕X轴的角速度分量,Device angular-velocity component around the X axis,IMU axis
+7,rotationRate.y,旋转速率Y轴,Rotation rate Y axis,惯性测量单元,Inertial measurement unit,设备绕Y轴的角速度分量,Device angular-velocity component around the Y axis,IMU axis
+8,rotationRate.z,旋转速率Z轴,Rotation rate Z axis,惯性测量单元,Inertial measurement unit,设备绕Z轴的角速度分量,Device angular-velocity component around the Z axis,IMU axis
+9,gravity.x,重力向量X轴,Gravity vector X axis,惯性测量单元,Inertial measurement unit,设备坐标系中的重力向量X分量,Gravity-vector X component in device coordinates,IMU axis
+10,gravity.y,重力向量Y轴,Gravity vector Y axis,惯性测量单元,Inertial measurement unit,设备坐标系中的重力向量Y分量,Gravity-vector Y component in device coordinates,IMU axis
+11,gravity.z,重力向量Z轴,Gravity vector Z axis,惯性测量单元,Inertial measurement unit,设备坐标系中的重力向量Z分量,Gravity-vector Z component in device coordinates,IMU axis
+12,time_since_touch_down,按下后经过时间,Elapsed time since touch down,位置与时间,Position and time,从ACTION_DOWN到当前采样帧的经过时间,Elapsed time from ACTION_DOWN to the current sampled frame,time
+13,time_since_anchor,锚点后经过时间,Elapsed time since anchor,位置与时间,Position and time,从当前训练窗口锚点到采样帧的相对时间,Relative time from the current training-window anchor to the sampled frame,time
+14,multi.major_px,接触椭圆长轴像素长度,Contact ellipse major-axis length in pixels,接触几何,Contact geometry,系统报告的触摸接触椭圆长轴长度,Major-axis length of the touch-contact ellipse reported by the system,pixels
+15,multi.minor_px,接触椭圆短轴像素长度,Contact ellipse minor-axis length in pixels,接触几何,Contact geometry,系统报告的触摸接触椭圆短轴长度,Minor-axis length of the touch-contact ellipse reported by the system,pixels
+16,multi.valid_mask,接触几何有效标记,Contact-geometry validity mask,接触几何,Contact geometry,指示本帧接触长短轴数据是否有效的数值标记,Numerical flag indicating whether contact major and minor axes are valid for this frame,0 or 1 flag

@@ -44,16 +44,15 @@
 - `AispectHoldControlView`：重触长按的控制视图，支持旋钮位置更新与回弹重置。
 - `AispectHeavyIndicatorView`：重触命中提示视图，用高亮环与文字提示当前重触状态。
 
-## CNN 冲击分类补充
-- `AispectImpactCNNClassifier`：内置轻量一维卷积推理器，读取打包到 App Bundle 的权重与 scaler，对 `-5...+15` 的 21 帧冲击窗口执行二分类，输出 heavy/light 概率。
-- `AispectImpactFrame`：统一冲击窗口单帧输入结构，包含 `delta/x/y/z` 四个特征，便于日志缓冲与模型推理复用。
-- `AispectImpactPrediction`：封装 CNN 输出的 heavy/light 概率，并提供当前主类别判断。
-- `AispectImpactDetector.Config`：新增 `usesCNNClassifier` 与 `cnnHeavyProbabilityThreshold`，用于控制阈值候选后是否启用 CNN 二次判定以及命中门槛。
-- `AispectImpactDetector`：保留原有 delta 阈值作为候选触发器，补齐后 15 帧后再执行 CNN 判定；若触摸结束过早，则在 `stop()` 时零填充尾帧完成一次兜底分类。
-- `AispectImpactCNNWeights.json` / `AispectImpactCNNScaler.json`：保存从现有 `.pth` 权重提取后的参数与全局归一化统计，用于手机端直接推理，不依赖 PyTorch 或 Core ML 运行时。
+## 历史 CNN 冲击分类补充（已停用）
+- `AispectImpactCNNClassifier`：历史版本曾读取 App Bundle 权重，对抬起中心的 `-5...+15` 21 帧窗口执行 heavy/light 二分类；旧权重和 scaler 仍保留用于历史复现，不参与 schema v5 新标准结果。
+- `AispectImpactFrame`：历史版本曾包含 `delta/x/y/z` 特征；新标准只写真实传感器通道，不再计算或落盘 `delta`。
+- `AispectImpactPrediction`：历史输出结构保留用于兼容旧资源，新按下锚点模型尚未训练时不产生预测。
+- `AispectImpactDetector`：历史 delta 阈值候选触发和旧 21 帧 CNN 已移出运行路径，当前只等待按下锚点 `-5...+9` 真实窗口并报告模型待训练。
+- `AispectImpactCNNWeights.json` / `AispectImpactCNNScaler.json`：旧模型资源继续保留，不依赖 PyTorch 或 Core ML 运行时加载新标准模型；新模型待 schema v5 数据重新训练后再接入。
 
 ## 训练数据采集补充
-- `AispectImpactDatasetCollector`：日常采集模块，支持手动选择 `handheld_static/placed_static/walking` 与 `light/heavy` 组合标签，并在每次触摸结束后自动补齐 `-5...+15` 的 21 帧训练窗口。
+- `AispectImpactDatasetCollector`：日常采集模块，支持手动选择 `handheld_static/placed_static/walking` 与 `light/heavy` 组合标签，并在按下/抬起双锚点原始窗口结束后保存可变长度真实序列；固定训练窗口暂定为按下 `-5...+9`，待新数据训练。
 - `AispectImpactMotionState` / `AispectImpactTouchStrength` / `AispectImpactDatasetLabel`：用于表达训练样本的运动状态与触摸强度标签，当前将“手持静止”和“放置静止”显式拆分，避免旧 `static` 标签混杂两类场景；同时保留对历史 `static` 样本的兼容解码并映射到 `handheld_static`。
 - `AispectImpactSystemActivityEvidence`：封装 `CMMotionActivityManager` 给出的系统侧活动证据，记录 `walking/stationary/running` 等状态布尔值、置信度与授权状态，用于和人工标签一起落盘，便于后续清洗错标样本。
 - `AispectImpactDatasetCollector.Status`：新增结构化状态回调，包含任务标签、有效/无效计数、任务目标数与最近一次采集结果，便于 UI 做任务式反馈。
@@ -69,19 +68,40 @@
 - `ZHIFAeyes.xcodeproj`：补充 `NSMotionUsageDescription`，允许真机上请求系统运动与健身权限，采集 walking/static 的系统侧证据；当前工程名、Target、产品名与入口文件已统一重命名为 `ZHIFAeyes`。
 - 采集数据目录：默认写入 App 沙盒 `Documents/AispectImpactDataset`，每条样本单独保存为 JSON，便于后续批量导出到训练脚本。
 
+## 按下/抬起双锚点原始采集补充
+- `AispectSignalWindowBuilder.buildDualAnchor`：Android 原始窗口使用时间与帧数双下限。开始位置取 `down-85ms` 与按下前 `15` 个真实 IMU 帧中更早者；结束位置取 `lift+85ms` 与抬起后 `15` 个真实 IMU 帧中更晚者。窗口长度随采样率和按压时长变化，不补零伪造原始帧。
+- Android `AispectCollectionController`：抬起后首次等待 `85ms` 检查窗口；若按下侧已完整而抬起侧尚未同时满足 `85ms` 和 `15` 帧，则每 `8ms` 继续检查，最长等待 `500ms`。超时或按下前冗余无法补救时仍保存真实帧，并以 `windowComplete=false` 供清洗层筛除。
+- Android schema `6` 保持兼容并新增版本化 `captureWindow` 审计对象，声明 `dual_anchor_min_time_and_frames_v1`、前后要求时长/帧数、实际覆盖时长和四个分项完成状态；旧根级 `preDownFrameCount`、`postLiftFrameCount` 与 `windowComplete` 继续保留。
+- iOS `AispectImpactDetector` / `AispectImpactDatasetCollector` 当前仍为 schema `5` 和纯前后 `15` 帧规则，尚未同步 Android 的 `85ms + 15帧` 双下限；跨平台采集合同在 iOS 完成同构改造和真机验收前不能视为已统一。
+- 原始采集冗余与模型输入严格分离。当前 v2 模型仍只使用 `-15...+25ms` 九个物理时间槽，扩大原始保存范围不会增加模型通道、训练窗口或按下期推理延迟。
+- 新标准原始 IMU 帧不写入 `delta` 或 `maxAbsDelta`，只保留真实加速度、陀螺仪、重力、触摸归一化坐标和时间对齐字段。旧模型资源和历史数据保留，但在新标准采集路径中不作为分类结果；新模型需在 schema v6 数据重新采集后训练。
+
+## Android schema v6 时间对齐补充
+- `AispectCaptureClock`：使用一次触摸回调中的 `SystemClock.uptimeMillis()` 与 `SystemClock.elapsedRealtimeNanos()` 观测对，将 `MotionEvent.getEventTime()` 的 uptime 毫秒换算到 `elapsedRealtimeNanos`。该换算只用于建立跨源共同时间轴；原始 `eventTimeMillis` 仍完整保存。
+- `AispectModels.ImpactFrame`：每个 IMU 帧新增 `sensorTimestampElapsedRealtimeNanos`（硬件 `SensorEvent.timestamp`）和 `receivedElapsedRealtimeNanos`（应用收到该回调的单调时钟）。窗口复制与锚点重算会保留这两个字段，补位帧统一为 `0`，不伪造原始时间戳。
+- `AispectTouchFrame`：每个 `touchFrames[]` 元素新增 `eventElapsedRealtimeNanos` 与 `receivedElapsedRealtimeNanos`。历史触摸点共用其所在 `MotionEvent` 回调的接收时刻，但各自按自己的 `eventTimeMillis` 还原事件时刻。
+- `AispectCollectionController`：`ACTION_DOWN` 保存按下事件/接收单调时间；按下和抬起锚点、IMU 窗口选择均使用同一 `elapsedRealtime` 时间轴。采集窗口的旧相对时间字段继续写出，供历史工具兼容读取。
+- `AispectDataLogger`：新记录使用 `schemaVersion: 6`，新增 `timeAlignment` 对象，保存按下/抬起的事件与接收时间、时钟来源和双时间门。训练阶段必须同时满足 `touchReceivedElapsedRealtimeNanos <= imuReceivedElapsedRealtimeNanos` 与 `touchEventElapsedRealtimeNanos <= imuSensorTimestampElapsedRealtimeNanos`，再选择最新触摸帧执行零阶保持（ZOH），不得按名义采样率配对。
+- `android/analysis/causal_press_features.py` / `AispectCausalPressFeatureBuilder`：schema v6 按下期活动合同为 `causal_imu12_v1`（9 个 IMU + 归一化坐标 + `touch_valid`）和 `causal_imu11_touch9_v1`（20 通道）。二者只读取 IMU 与逐帧 `touchFrames[]`，不读取根级 Contact Patch、整次归一化画像、抬起相对时间或其他结束后汇总。20 通道版本追加 pressure、size、按当前视图对角线归一化的 major/minor、对数轴比、方向 sin/cos、指针数和触摸有效位。缺少 IMU 硬件/接收时间、触摸事件/接收时间或已对齐触摸帧的视图尺寸时，因果输入拒绝构建。
+- `AispectTouchFrame`：schema v6 的 `touchFrames[]` 每帧新增 `viewWidthPx` 与 `viewHeightPx`，使训练端可以使用产生该触摸帧时的真实视图对角线归一化接触轴，而不使用整次触摸最大值或结束后聚合值。
+- `train_android_finger_four_class_cnn.py` / `AispectImpactCNNClassifier`：新的 down-anchor CLI 默认并强制使用 causal preset，拒绝 legacy preset、手工特征名单和矩阵后处理变换；训练 scaler 与报告写入 `featureContract`。训练分割出口强制检查 train/valid 的原始 session 不交集且不得缺失 session ID。Android 仅在 scaler 的合同为 causal v1 时把已就绪按下窗口和 `activeTouchFrames` 传入因果构建器，然后使用导出的 center/scale 标准化；旧模型保持显式 legacy 兼容路径，不会被解释为新因果模型。
+- `android/analysis/training_common.py` / `android/analysis/legacy/README.zh-CN.md`：新训练器的通用 PyTorch、张量、解析和 JSON 工具已与旧 schema v5 训练脚本解耦；旧 `train_android_touch_cnn.py` 及其汇总特征路径只允许历史复现，禁止处理 schema v6 因果训练。
+- `AispectLegacyFeatureBuilder`：旧 Contact Patch、`touchNormalization`、高斯图、多通道、协方差和 `time_since_anchor` 读取已集中到 `aispect/legacy` 包，仅供非 causal 合同历史模型复现。主分类器先判断 `causal_*` 合同，causal 分支不会调用该类，也不会读取根级聚合字段；新增因果模型禁止复用 legacy 入口。
+
 ## Android 移植与采集补充
 - `android/`：新增独立 Android 多模块工程，包含可复用库模块 `aispect-core` 与采集示例 App；当前迁移范围排除声学与闭眼相机链路，优先落地触摸采集、IMU 窗口、设备能力画像、CNN 诊断与 JSON 落盘。
-- `AispectCollectionController`：Android 采集主入口，宿主 View 只需把 `MotionEvent` 与控件宽高传入 `handleMotionEvent`，即可完成单次触摸的原始触摸帧、事件流、IMU 后置窗口、设备能力、CNN 诊断与训练样本保存。
+- `AispectCollectionController`：Android 采集主入口，宿主 View 只需把 `MotionEvent` 与控件宽高传入 `handleMotionEvent`，即可完成单次触摸的原始触摸帧、事件流、按下期窗口就绪状态、按下/抬起双锚点 IMU 原始窗口、设备能力与训练样本保存；旧 CNN 诊断路径默认关闭。
 - `AispectTouchFrame` / `AispectTouchAxisReader`：采集 Android 系统公开触摸底层字段，优先使用 `MotionEvent` 标准 axis，兼容读取 `AXIS_TOUCH_MAJOR`、`AXIS_TOUCH_MINOR`、`AXIS_TOOL_MAJOR`、`AXIS_TOOL_MINOR`、`AXIS_PRESSURE`、`AXIS_SIZE`、`AXIS_ORIENTATION`，并回退到 `getTouchMajor/getTouchMinor/getToolMajor/getToolMinor/getPressure/getSize/getOrientation` 便捷接口。
 - `AispectDeviceCapabilityProfiler`：基于 `InputDevice.MotionRange` 与实际采样值生成 Level A/B/C 能力画像；Level A 表示具备 major 且有 minor/pressure/size/orientation 等增强字段，Level B 表示只有 major 或近似半径，Level C 表示无可靠触摸半径并回退到通用 IMU/坐标/时间通道。
 - `AispectContactPatch`：把 Android 触摸椭圆归一化为跨设备接触 patch；当 major/minor 可用时使用椭圆协方差，当只有 major 或 toolMajor 时转为近似圆形半径，当所有半径字段不可用时使用默认小 patch 并记录 `defaultApplied`，避免训练 schema 断裂。
 - `AispectContactEncodingProfile`：新增真正面向 CNN 输入设计的 Contact Patch 三方案编码，包含 `gaussian_map`、`multi_channel`、`covariance_matrix`。其中二维高斯方案输出固定 `9x9` 接触热图，缺失半径时使用默认 `sigma = 12px` 且 `validMask = 0`；多通道方案输出中心、major、minor、orientation 与 valid mask；协方差方案输出 `x/y/cov_11/cov_12/cov_22/validMask`。每条新 Android 样本会同时写入三套编码，面板按钮只标记本轮主方案，便于后续离线横向比对。
 - `AispectTouchNormalizationEngine` / `AispectTouchNormalizationProfile`：Android 触摸归一化新增三套可切换方案，分别为屏幕比例归一化、接触椭圆协方差矩阵归一化、本轮历史基线相对归一化；采集面板允许在采集关闭时切换当前方案，训练样本 JSON 会同时写入 `screenScale`、`covarianceMatrix`、`sessionBaseline`、设备内分位诊断、短期历史偏移诊断、字段质量标记与 `contactPatch`，便于后续离线对比哪套方案更优。
-- `AispectImpactSignalCollector` / `AispectSignalWindowBuilder`：使用 `Sensor.TYPE_LINEAR_ACCELERATION` 优先、`TYPE_ACCELEROMETER` 兜底，并同步采集 gyroscope 与 gravity；Android 目标采样周期调整为 4167us，尽量贴近 iOS 240Hz 冲击采样；触摸结束后按 anchor timestamp 构造 `preFrames/postFrames` 短窗口，默认兼容 iOS `-5...+15` 窗口。
+- `AispectImpactSignalCollector` / `AispectSignalWindowBuilder`：使用 `Sensor.TYPE_LINEAR_ACCELERATION` 优先、`TYPE_ACCELEROMETER` 兜底，并同步采集 gyroscope 与 gravity；Android 目标采样周期调整为 4167us，尽量贴近 iOS 240Hz 采样；`ACTION_DOWN` 后按 down timestamp 等待完整真实 `-5...+9` 窗口，抬起后另行构造 `down-15...lift+15` 原始窗口，不计算 delta。
 - `AispectImpactSignalCollector` / `AndroidManifest.xml`：补充 Android 12+ 高频传感器权限 `HIGH_SAMPLING_RATE_SENSORS`，并在注册 4167us 采样失败时按 10000us、16667us、`SENSOR_DELAY_GAME`、`SENSOR_DELAY_UI` 逐级降级，避免小米 Android 15 因高频 IMU 注册抛出 `SecurityException` 导致点击采集开关闪退。
-- `AispectImpactCNNClassifier`：Android 侧内置纯 Java 1D CNN 推理器，支持当前 iOS 4 通道模型与旧触控包内多组 `g11/g13_time` 模型；新增 `ModelInfo`、`availableModels()`、`modelInfoForId()` 与 catalog 加载缓存，宿主可以显示真实模型列表并指定模型执行诊断推理。推理特征读取已扩展到 `contactPatch.cov_11/cov_12/cov_22`、`sigmaX/sigmaY`、`touchNormalization.rawMajorPx/rawMinorPx/areaValue/confidence`，用于后续 22 通道 Android CNN 权重回装。
-- `AispectImpactCNNClassifier`：补齐 Contact Patch 三方案 CNN 输入的手机端同名特征读取，支持 `gaussian.map.00...80`、`gaussian.center/sum/energy/spread/sigma_x_px/sigma_y_px/valid_mask`、`multi.center_x_norm/center_y_norm/major_px/minor_px/orientation_rad/valid_mask`、`covariance.x_norm/y_norm/cov_11/cov_12/cov_22/valid_mask`。推理时优先使用 `AispectContactEncodingProfile` 的三套结果，缺失时按默认 `sigma = 12px` 与 `validMask = 0` 兜底；缺失 IMU 帧与训练脚本保持一致按零帧补齐，避免训练可用而手机端不出结果。
+- `AispectImpactCNNClassifier`：Android 侧内置纯 Java 1D CNN 推理器，支持当前 iOS 4 通道模型与旧触控包内多组 `g11/g13_time` 模型；新增 `ModelInfo`、`availableModels()`、`modelInfoForId()` 与 catalog 加载缓存，宿主可以显示真实模型列表并指定模型执行诊断推理。历史 Contact Patch 与归一化字段统一由 `AispectLegacyFeatureBuilder` 提供，不能从 causal 分支进入。
+- `AispectLegacyFeatureBuilder`：补齐旧 Contact Patch 三方案 CNN 输入的手机端同名特征，支持 `gaussian.map.00...80`、`gaussian.center/sum/energy/spread/sigma_x_px/sigma_y_px/valid_mask`、`multi.center_x_norm/center_y_norm/major_px/minor_px/orientation_rad/valid_mask`、`covariance.x_norm/y_norm/cov_11/cov_12/cov_22/valid_mask`。缺失 IMU 帧与历史训练脚本保持一致按零帧补齐；该路径仅用于旧模型复现。
 - `AispectImpactCNNClassifier`：关键输入链路已补充中文注释，明确手机端必须按训练导出的 `featureNames` 顺序取值、缺失时间帧补零、高斯热图缺失时重建、默认 `sigma` 只作占位且由 `validMask` 表达可信度，避免后续复用模块时误把 `confidence` 当成力度标签。
+- `AispectLegacyFeatureBuilder`：仅为旧模型复现保留 `contactPatch.*`、`touchNormalization.*`、`gaussian.*`、`multi.*` 和 `covariance.*` 的特征映射，并保持缺失历史字段的旧占位策略。该类不参与任何 `causal_imu12_v1` 或 `causal_imu11_touch9_v1` 模型。
 - `AispectImpactCNNClassifier`：新增 Android 全量原始数据前五窗口 22 通道 CNN 模型，包含 `android_patch22_pre5_post9`、`android_patch22_pre5_post6`、`android_patch22_pre5_post10`、`android_patch22_pre5_post0` 与 `android_patch22_pre5_post7`；旧 `g13_time` 模型继续作为 catalog 后续可选项保留。
 - `AispectImpactCNNClassifier`：二分类默认回装模型切到 `android_patch21_no_confidence_pre5_post9`，输入为 `enhanced_patch21_no_confidence` 的 21 通道 `-5...+9` 窗口，不再把 `touchNormalization.confidence` 作为训练或推理通道；当前权重使用全量 high_quality 清单训练，并将大面积轻触 hard negative 加权为 3.0。旧 `android_patch22_pre5_post9` 仍留在 catalog 中便于手机端手动切换对照。
 - `AispectImpactCNNClassifier` / `AispectModels.ImpactPrediction`：端侧 CNN 推理从固定二分类输出扩展为读取 scaler 中的 `classCount` 与 `labelOrder`，支持二分类 heavy/light 与四分类 `thumb_light/thumb_heavy/index_light/index_heavy` 共用同一套模型切换、推理和 JSON 诊断落盘；旧 `heavyProbability/lightProbability/isHeavy()` 字段继续保留作为二分类兼容接口。
@@ -91,7 +111,7 @@
 - `AispectImpactCNNModelCatalog.json`：新增并置顶 OnePlus PHK110 设备专属四分类时间留出优先模型 `oneplus_four_class_hard_core_old13`，基于当前手机 `handheld_static` 四类 high_quality + review hard 样本平衡训练，并按每类最新 25% 做时间留出复核。随机切分第一名 `old13_raw_radius` 在时间留出下暴露食指/拇指混淆，`old13` 时间留出平衡准确率约 `91.67%` 且 `index_light` 召回约 `93.9%`，因此端侧四分类默认模型切到 `old13`，`old13_raw_radius` 保留为 catalog 第二项用于对照。
 - `AispectImpactCNNModelCatalog.json`：新增并置顶补采后 OnePlus 四分类装机模型 `oneplus_four_class_after_recollect_hard_nearfull_old13_raw_radius`，并保留 `oneplus_four_class_after_recollect_hard_temporal10_old13_raw_radius` 作为第二项对照。模型选择基于手机当前 `4641` 条原生 JSON 重新清洗后的 hard 平衡集，每类 `321` 条；严格每类最新 `25%` 时间留出显示分布漂移仍很强，最佳仅约 `71.56%` 平衡准确率，因此只作为自我批判指标。用于选择 preset 的 `10%` 最新尾段留出中，`old13_raw_radius` 平衡准确率约 `88.28%`，四类召回约 `thumb_light 75.0% / thumb_heavy 96.9% / index_light 90.6% / index_heavy 90.6%`，同强度轻触互混 `7` 次、重触互混 `1` 次；当前端侧默认四分类模型使用同一 preset 的 nearfull 训练版，训练集中每类 `320` 条，剩余每类 `1` 条仅用于导出健康检查。
 - `AispectImpactCNNModelCatalog.json`：修复四分类训练脚本未真正使用 `sample_weight` 的问题后，新增并置顶 weighted 装机模型 `oneplus_four_class_after_recollect_hard_nearfull_weighted_old13_multichannel`，并保留 `oneplus_four_class_after_recollect_hard_temporal10_weighted_old13_multichannel` 作为第二项评估对照。weighted `10%` 最新尾段核心消融中，`old13_multichannel` 平衡准确率约 `87.50%`、最小召回约 `81.25%`，四类召回约 `thumb_light 84.4% / thumb_heavy 90.6% / index_light 93.8% / index_heavy 81.2%`，同强度轻触互混 `6` 次、重触互混 `0` 次；相较 raw radius，牺牲少量总分但降低半径单点依赖并改善最弱类，因此端侧默认四分类模型切到 weighted multichannel nearfull 版。
-- `AispectCollectionController`：新增当前 CNN 模型选择状态；屏幕验证推理优先使用用户选中的模型，失败时再回退自动选择策略。`Status` 同步输出最后一次触摸事件、最近采样率、冲击窗口 `maxAbsDelta` 与完整窗口日志，供 Android 面板复刻 iOS 的实时事件行和 `impact delta window` 日志显示。触摸结束后会先生成 `contactPatch` 与三套触摸归一化画像，再把它们传入 CNN 推理器，保证增强模型可以真正吃到触摸半径和协方差输入；训练 JSON 落盘时不写入 CNN 预测。
+- `AispectCollectionController`：旧模型选择状态仍保留用于历史对照，但新标准不调用 CNN。`Status` 输出按下窗口等待/就绪、最近采样率与原始窗口摘要；触摸结束后生成 `contactPatch` 与三套触摸归一化画像并写入 schema v6，训练 JSON 不写入 CNN 预测或 delta 派生值。
 - `AispectModels.ImpactPrediction` / `AispectCollectionController`：二分类 heavy 输出新增端侧证据约束，CNN 判为 `heavy` 后仍需满足足够冲击 `maxAbsDelta`，并同时具备持续形态变化或时间动态证据；接触面积、半径、字段质量和归一化置信度不能单独把一次触摸推出重触。证据不足时二分类结果会降级为 light，四分类模型输出保持原有标签分布用于验证和切换。
 - `AispectCollectionController` / `MainActivity`：CNN 模型切换改为手机端热切换，训练采集开关打开后仍可在两次触摸之间切换“下一次触摸”使用的模型；单次触摸开始时会锁定当时的 `activeModelId`，避免一条样本中途换模型导致诊断结果不可追溯。标签、运动场景与接触编码仍按采集任务锁定，保证训练真值稳定。
 - `MainActivity`：CNN 诊断显示改为固定高度方框，稳定展示模型、最高预测、置信度和人工标签，不再因为概率列表或行数变化撑开布局；人工标签占位符与传参顺序同步修正为手指、轻重点、场景，四分类模型继续展示预测类别，旧二分类模型继续显示轻点/重点输出，模型切换面板仍沿用现有上一项/下一项交互。
@@ -121,10 +141,31 @@
 - `android/analysis/mark_android_history_thumb.py`：历史 Android 样本手指标签补标脚本，按结构化 JSON/CSV 解析补齐 `label.fingerType = thumb`、`finger_type` 列与带 `_thumb` 的标签名；当前已用于本地 `9185` 条唯一原始样本及其展开整理副本，保持旧采集数据明确归类为拇指。
 - `android/analysis/build_android_finger_four_class_dataset.py`：从手机全量 raw 与旧拇指基准目录构建手指四分类数据集，按文件差集将旧样本视为 `thumb`、新增样本视为 `index`，并默认限定同一运动场景后按 `thumb_light/thumb_heavy/index_light/index_heavy` 四类抽取均衡 manifest 与可独立训练的 JSON 副本。当前脚本也支持直接读取清洗后的 `source manifest` 与 `quality_buckets`，优先使用 manifest/JSON 中的 `finger_type`，只有旧样本缺失手指字段时才回退到文件名或参考目录推断，避免补采样本被二次误标。
 - `android/analysis/train_android_finger_four_class_cnn.py`：新增四分类 CNN 训练入口，复用现有 `enhanced_patch22` 特征提取和 `-5...+9` 时间窗口，输出四类顺序、权重、scaler 与训练报告；当前导出结果标明需要手机端推理器支持四类输出后才能直接部署到端侧。训练入口新增 `split_strategy`，支持随机分层切分与按每类 `created_at` 最新样本留出的 temporal 切分，后续默认用 temporal 结果审计连续采集造成的验证泄漏。四分类训练现在会读取 manifest 的 `sample_weight` 并使用 `CrossEntropyLoss(reduction="none")`，确保大面积轻触 hard negative 的权重真正进入损失函数，而不是只存在于 CSV 中。
+- `android/analysis/clean_android_touch_dataset.py`：跨设备清洗规则改为按“设备名称 + 运动状态”计算 `max_abs_delta` 与触摸位移的稳健上限，保留绝对安全下限同时避免 PHK110 walking 的正常量纲被固定阈值整体误删；新增 `weighted_train_manifest.csv`，高质量样本权重为 `1.0`、非致命 review 样本权重为 `0.35`，疑似人工标签与形态冲突样本继续降权，不再把冲突样本反向放大。
+- `android/analysis/build_grouped_four_class_manifest.py`：读取全量主 manifest 与多批清洗质量 manifest，按 ID 合并质量分层，未清洗的新 collection 默认拒绝进入训练；脚本按 collection 起点生成五分钟 `session_group`，支持按最小时间间隔压缩连续冗余样本，并把指定 collection 整体标记为 predefined validation，输出行数、质量层、去重、降采样和会话组统计。
+- `android/analysis/train_android_finger_four_class_cnn.py`：新增 `sample_cache` 特征缓存和 `early_stopping_patience` 控制；缓存记录特征 preset、时间窗口和缺帧策略签名，后续 collection 留出折只重新应用当前 manifest 的 split，签名不一致、缓存缺少 manifest 样本或 manifest 新增缓存外样本时都会拒绝复用。早停仍按验证集平衡准确率保存最佳权重，减少跨批次指标停止改善后继续训练的成本。
+- `models/all_collections_grouped_clean_v2_20260724`：保存四个新增 collection 的严格留出模型、一个随机切分对照、统一比较表与诊断报告。清洗后随机切分平衡准确率约 `83.77%`，四个整批留出折分别约为 `57.83% / 28.67% / 67.28% / 27.41%`；LE2110 接触长轴中位数约 `5~15px`、触摸帧约 `2~5`，PHK110 分别约 `1.2~1.5` 与 `7~9`，证明当前 patch21 仍主要学习设备和采集会话特征，暂不具备替换端侧模型的跨批次泛化条件。
+- `android/analysis/train_android_finger_four_class_cnn.py`：现有数据离线去设备偏差实验新增 `imu11_no_time`、`invariant_shape` 与 `relative_touch` 三种矩阵变换。前者只保留坐标与九个 IMU 通道；无量纲形状方案追加长短轴对数比、协方差相关系数和偏心率；相对接触方案再追加当前 major/minor/面积相对同 collection/source group 最多 256 条历史无标签样本滚动中位数的对数比和基线就绪度，严格按时间先计算再写入当前样本，不读取未来样本或标签。
+- `android/analysis/train_android_finger_four_class_cnn.py`：新增训练折内 `collectionName + classLabel` 逆频率权重，先按组样本数计算、归一化到均值 `1.0`、裁剪至 `0.25~4.0`，再乘 `cleaned_v2` 质量权重；该步骤只接收 split 后的训练样本，验证样本不参与统计或加权。
+- `android/analysis/run_group_invariant_four_class_experiments.py`：基于同一 patch21 特征缓存串行执行三种派生输入乘四个完整 collection 留出折，固定 batch `128`、seed `22`、最多 `120` epoch 与 patience `20`，已完成报告自动跳过并支持中断恢复；结束后聚合每折平衡准确率、最弱召回和混淆矩阵到统一 CSV/JSON。
+- `android/analysis/train_android_finger_four_class_cnn.py`：训练与验证张量改为 CPU 常驻并按 batch 搬入 CUDA，训练继续使用 CUDA `randperm` 保持随机顺序，验证按最多 2048 条分批推理；模型、优化器和损失函数仍驻留 GPU，避免 Windows WDDM 在整折张量一次映射时出现显存充足但 `resource already mapped` 或小额分配失败。
+- `android/analysis/train_android_finger_four_class_cnn.py`：历史计划准备模式仍只读扫描旧 schema manifest；因果训练实际要求 schema v6、双时间字段、逐帧视图宽高和 session-disjoint split。缺失这些字段时必须拒绝样本，不能用设备常量或整批数据反推后静默补齐。
+- `android/analysis/train_android_finger_four_class_cnn.py`：新增 `--anchor-mode down|lift`。`down` 使用 `downReferenceFrameIndex` 构造可部署的固定窗口；`lift` 仅用于离线抬起期上限对照。训练报告新增最佳 epoch、锚点模式、按 `motionState` 和 `durationBucket` 分组的训练/验证指标，避免只凭整体随机指标选择模型。
+- `android/analysis/datasets/all_collections_invariant_v3_20260724` / `models/all_collections_invariant_v3_20260724`：保存仅使用现有数据的离线去设备偏差定义、12 个严格 collection 留出模型及候选比较。`relative_touch` 四折平均平衡准确率约 `44.72%`、最差折约 `32.11%`、最坏类别召回约 `9.10%`；相较原始 patch21，最差折和最坏类别有所改善，但平均值从约 `45.30%` 略降，未达到平均 `70%`、最差折 `60%` 的门槛，因此只保留为诊断结果，不导入 Android 模型目录。
+- `models/all_collections_old13_seen_devices_v2_20260724`：完全复刻 `full_old13_seen_devices_120` 的 `old13`、`-5...+9`、120 epoch、batch `256`、学习率 `0.001`、weight decay `0.0001`、随机 `25%`、seed `22` 与 zero 缺帧方式，只把旧 `49051` 条数据替换为当前 grouped clean v2 的 `79878` 条。新模型训练/验证为 `59908/19970`，验证平衡准确率约 `79.15%`，低于旧模型约 `81.20%`；新增数据扩大了用户、设备和 collection 分布，随机验证仍可用但没有提升，模型保留为比较产物而不自动替换端侧默认模型。
+- `AispectImpactCNNModelCatalog.json` / `crossDevice` 产品变体：将最终全量训练模型 `full_old13_seen_devices_current_preprocessed_all_118` 的 scaler 与 weights 导入 Android assets 并置顶模型目录，`crossDevice` 变体的 `DEFAULT_MODEL_ID` 同步指向该模型；带随机验证的 `full_old13_seen_devices_current_preprocessed_120` 与旧 `full_old13_seen_devices_120` 继续保留为可切换对照，标准变体默认模型不变。
+- `android/analysis/train_android_finger_four_class_cnn.py`：新增 `split_strategy=all` 最终训练模式，全部样本进入训练且验证集为空；无验证样本时每个 epoch 都更新待导出状态，因此固定 epoch 训练会明确导出最后一轮权重，不使用训练准确率模拟模型选择，也不会触发验证早停。训练报告中的 valid count 和指标保持为零，避免把全量训练指标误解为验证结果。
+- `models/all_collections_old13_seen_devices_v2_20260724/full_old13_seen_devices_current_preprocessed_all_118`：在随机验证模型确定最佳 epoch `118` 后，使用相同 old13、`-5...+9`、batch `256`、学习率 `0.001`、weight decay `0.0001` 与 seed `22`，把 grouped clean v2 全部 `79878` 条按四分类合并训练，不保留验证集。最终训练平衡准确率约 `85.34%`，四类训练召回约为 `thumb_light 79.40% / thumb_heavy 81.12% / index_light 92.44% / index_heavy 88.39%`；这些只表示全量拟合状态，模型选择依据仍是前一轮随机验证，不把训练指标当成新验证结论。
 - `android/analysis/run_android_finger_four_class_cnn_ablation.py`：新增拇指/食指轻重点四分类正式 CNN 全量消融脚本，固定同一四分类 manifest、`-5...+9` 时间窗口、训练参数与随机种子，逐个调用 `train_android_finger_four_class_cnn.py` 训练 `old13`、raw 半径、多通道、协方差、高斯热图和 22 通道等 12 个 preset，并汇总通道数、四类召回、验证准确率、验证平衡准确率、最小召回与混淆矩阵到 `finger_four_class_cnn_ablation_summary.csv` 和 `finger_four_class_cnn_ablation_report.json`。消融入口同步透传 `split_strategy`，使 preset 排名可以直接基于时间留出，而不是只看随机验证。
-- `android/analysis/train_android_touch_cnn.py`：面向 Android 的 CNN 训练导出脚本，读取清洗后的训练 manifest，默认使用 `enhanced_patch21_no_confidence` 输入预设。该预设在旧 `old13` 的坐标、IMU 与时间通道基础上，追加 `patch9` 中除 `touchNormalization.confidence` 之外的接触协方差、归一化半径与面积通道，并导出 `AispectImpactCNNWeights_*.json`、`AispectImpactCNNScaler_*.json`、训练报告和 catalog 项；导出的类别顺序保持 `heavy/light`，便于直接接入现有 `AispectImpactCNNClassifier`。
-- `android/analysis/train_android_touch_cnn.py`：正式接入 Contact Patch 三方案作为 CNN 训练预设，新增 `old13_raw_radius`、`old13_covariance`、`old13_multichannel`、`old13_gaussian_summary`、`old13_gaussian_map9x9`、`gaussian_map9x9_only`、`multichannel_only`、`covariance_only` 与 `enhanced_patch21_no_confidence`。历史 JSON 若没有 `contactEncoding` 字段，会直接从 `touchFrames` 原始触摸字段重建二维高斯、多通道与协方差输入；半径缺失时使用默认接触区域并通过 `validMask` 标记未知，不删除样本。
-- `android/analysis/train_android_touch_cnn.py`：训练预设、缺帧策略、Contact Patch 重建、`confidence` 语义和导出元数据处已补充中文注释，说明 `old13` 是动态基线、`patch9` 是探索集合、`enhanced_patch21_no_confidence` 用于排查流程偏置，便于后续缩减通道时保持训练端和手机端一致。
+- `android/analysis/run_schema5_full_factorial_ablation.py`：新增 schema v5 按下锚点四分类完整因子消融调度器，固定 12 个特征预设、7 个真实按下窗口和 3 个运动场景严格留出折。脚本复用既有 `feature_temporal`、`window_temporal` 和 `motion_holdout` 输出路径，只有同一 model id 的报告、权重和 scaler 全部存在时才跳过，支持中断恢复与 dry-run；每完成一项均重写状态、时间筛选和严格留出 CSV/JSON 汇总。每个 down-anchor 命令显式传入 `--require-press-active`，严格排序只作为离线候选评估，不导入 Android assets 或替换 App 默认模型。
+- `android/analysis/train_android_finger_four_class_cnn.py`：按下锚点训练现在强制 `--require-press-active`，只保留 `liftReferenceFrameIndex >=` 请求最大正帧索引的样本，禁止把抬起后的原始 IMU 帧伪装成按压期输入；直接将该条件设为 `False` 会报错。缓存签名增加 `causalPressActiveV1`，旧缓存不能复用；按下期缓存允许在同一完整 manifest 的不同严格折之间复用。内部 `lift` 对齐接口仅保留给完整触摸历史兼容，CLI 训练仍限定 `down`。新增 `--deterministic`，训练时固定 CUDA/cuDNN 的确定性配置并写入完整参数报告。
+- `android/analysis/run_android_down_window_252_ablation.py`：新增按下期时间窗口消融调度器。它生成 84 个连续 `down-pre ... down+post` 窗口规格，共覆盖 4 至 31 帧总长度；每个规格在 `handheld_static`、`placed_static`、`walking` 三个完整运动场景留出折上训练，合计 252 次。运行器固定 `old13_raw_radius`、按下锚点、因果过滤、确定性训练和既有 CNN 结构；每份完成报告的训练和验证计数都必须分别匹配 `liftReferenceFrameIndex >= postFrame` 的样本数。输出训练/验证/总可输出覆盖率、等待帧和约 210Hz 下的估算等待毫秒，并按验证准确率、最弱类召回率、总可输出覆盖率和更短等待构成的四目标 Pareto 前沿选择离线候选，不导入 Android assets。
+- `android/analysis/run_android_down_window_252_ablation.py`：新增 `dense_4_15` 窗口计划，在 4 至 15 帧总长度内遍历所有连续的 `preFrames + anchor + postFrames` 分配，共 114 个窗口。它与原 `representative_84` 计划共用训练和汇总逻辑，通过 `--window-plan` 选择；在三个运动状态留出折上共生成 342 次严格训练任务，用于取代稀疏抽样后查找局部稳定窗口区间。
+- `android/analysis/run_android_down_window_252_ablation.py`：新增 `--workers`，并发时按窗口分组调度，同一窗口的三个运动状态留出折依然串行，不同窗口可并发训练。该约束避免同一窗口共享 sample cache 的写入竞争；只有主调度进程写入全局汇总与进度文件，从而避免并发写文件冲突。子训练进程默认限制 `OMP_NUM_THREADS` 与 `MKL_NUM_THREADS` 为 `4`，也允许以环境变量覆盖；本次在 RTX 2080 上以 `6` 个窗口工作进程、每个 `2` 个 CPU 线程完成密集窗口训练。
+- `models/bbsiak_schema5_down_window_252_20260807/`：完成 252/252 次严格训练，252 份报告、权重和 scaler 均存在，84 个候选全部完成三折。最佳严格候选为 `pre1_post2`，即 `frameIndex=-1,0,1,2` 的四帧窗口：平均 balanced accuracy `69.63%`、最差折 `68.04%`、最差类别召回 `47.96%`、按压期覆盖率 `100%`，中位最佳 epoch 为 `31`。原 `pre5_post9` 在因果口径下排名第 40，平均 balanced accuracy `63.59%`、最差类别召回 `6.96%`、最差覆盖率 `97.50%`。原始 `timeSinceTouchDown` 显示 `+2` 的等待为 `10ms`，`+9` 为 `45ms`，`+15` 为 `75ms`；后两者的全量可用率分别为 `98.45%` 和 `72.23%`。该结果仅说明当前数据和严格场景留出口径下的最佳按下期窗口，尚未部署到 App。
+- `models/bbsiak_schema5_down_window_252_20260807/window_84_overview.csv`：按综合排名展开 84 个按下期窗口，使用“中文 (English)”对照表头并显式标记前十候选，并并列 `handheld_static`、`placed_static`、`walking` 三个留出折的最小类别召回率、平衡准确率与覆盖率；表尾保留三折平均、最差值和中位最佳 epoch，用于在 Excel/WPS 中直接筛选和对比离散窗口。
+- `android/analysis/legacy/train_android_touch_cnn_legacy.py`：历史 schema v5 CNN 训练导出脚本，保留旧 `old13`、Contact Patch 三方案与时间特征，仅用于历史模型复现、差异审计和旧资产迁移；根级 `train_android_touch_cnn.py` 只保留兼容转发，不得作为 schema v6 因果训练入口。
+- `android/analysis/legacy/train_android_touch_cnn_legacy.py`：历史 JSON 若没有 `contactEncoding` 字段，会从 `touchFrames` 重建二维高斯、多通道与协方差输入；半径缺失时使用旧默认接触区域并通过 `validMask` 标记未知。该逻辑与新的 `causal_press_features.py` 分离，不能混用。
 - `android/analysis/export_android_touch_feature_report.py`：新增不依赖 PyTorch 的增强特征报告脚本，读取 `balanced_train_manifest.csv` 后输出 `enhanced_patch_feature_report.json`、`enhanced_patch_feature_summary.csv`、`enhanced_patch_threshold_scan.csv` 与样本预览。报告用于在正式训练 CNN 前确认 `rawMajor/rawMinor`、`cov_11/cov_22`、`sigmaX/sigmaY`、三套归一化面积等通道对轻点/重点是否已有可学习差异。
 - `android/analysis/export_android_contact_encoding_report.py`：新增不依赖 PyTorch 的 Contact Patch 三方案比对脚本，直接从历史 JSON 的 `touchFrames` 原始字段重建二维高斯热图、多通道表示与协方差矩阵表示，输出 `contact_encoding_report.json`、`contact_encoding_samples.csv`、`contact_encoding_summary.csv` 和 `contact_encoding_threshold_scan.csv`。
 - `android/analysis/run_android_touch_ablation.py`：新增不依赖外部 Python 包的 Android 触摸训练级消融脚本，读取清洗后的 `balanced_train_manifest.csv`，固定同一批 train/valid 划分，对 `old13`、`old13_raw_radius`、`old13_covariance`、`old13_multichannel`、`old13_gaussian_summary`、`old13_gaussian_map9x9`、`patch9_only`、`enhanced_patch21_no_confidence` 与 `enhanced_patch22` 执行多 seed 的 diagonal LDA probe，并输出 `ablation_runs.csv`、`ablation_summary.csv`、`ablation_predictions.csv` 与 `ablation_report.json`。该脚本用于在 PyTorch 不可用时先验证各输入组的训练/验证贡献，不替代最终 CNN 权重训练。
@@ -140,6 +181,46 @@
 - `android/analysis/run_android_touch_window_ablation.py`：新增 Android 全量原始数据时间窗口消融脚本，读取 `ALL_NATIVE_NO_FILTER_manifest.csv` 后对 `pre/post` 连续时间窗执行多 seed 的 diagonal LDA probe；默认使用 `enhanced_patch22` 特征，缺失帧以零值补齐，确保有效和无效口径之外的全部已落盘原始样本都能参与窗口比较，并输出 `window_ablation_runs.csv`、`window_ablation_summary.csv` 与 `window_ablation_report.json`。
 - `android/analysis/train_android_touch_cnn.py`：训练导出脚本支持全量原始 manifest 的 `raw_original_path` 等路径字段，并新增缺失帧处理策略；默认用零值补齐缺失帧，使 CNN 训练口径可与全量窗口消融保持一致。当前已用该脚本导出前五窗口 Android 22 通道 CNN 权重和 scaler，并写入 `aispect_impact_models` assets。
 - Android 数据分层规则：所有手机原始 JSON 必须保留；清洗脚本只生成 `high_quality/review/rejected` 标签和 manifest，不删除原始样本。JSON 损坏、窗口帧缺失、多指、拖动/取消等样本会被标记为复核或 rejected；设备能力弱、触摸半径缺失、归一化无效、重触样本过短、大幅滑移或冲击异常的样本也只做质量标注。类别不均衡时可额外生成 `balanced_train_manifest.csv` 作为训练视图，但不得替代全量原始数据。
+
+## 原始触摸数据统一去重补充
+- `android/analysis/extract_unique_touch_data.py`：扫描 `data/lemon/lemon`、`data/tao/tao`、`data/collections/*/raw` 以及 `data/` 下的 `tar/tar.gz/tgz` 归档，将原始触摸 JSON 汇总到统一目录。目录源优先、归档源随后按归档原生顺序流式读取，避免压缩归档随机回跳导致重复解压。
+- `run_extraction`：使用样本顶层 `id` 作为主唯一键、原始 JSON 字节的 SHA-256 作为次唯一键。相同 ID 和哈希的后续候选记为重复；相同 ID 但哈希不同的候选记为冲突并拒绝覆盖；无 ID、非法 JSON 或非对象 JSON 不进入目标目录。
+- `iter_destination_candidates`：每次运行前先索引目标目录。若中断或并发曾留下内容完全相同的目标副本，保留路径较短的确定性版本并删除冗余副本；若目标内部出现同 ID 不同内容，则立即停止，禁止自动选择数据版本。
+- `data/deduplicated_raw/<collector>/<device>/<date>/`：统一数据按采集者、设备和本地日期分层保存，路径字段转换为小写 ASCII slug；缺失采集者时按 legacy 数据目录或 collection 名称回退，缺失设备或日期时使用明确的 unknown 分类。
+- `data/deduplicated_raw/manifest.csv`：记录每个保留样本的 ID、SHA-256、采集者、设备、日期、来源和相对目标路径。`duplicates.csv` 记录所有未复制候选及其原因与已保留目标；`summary.json` 保存目录数、归档数、发现量、保留量、重复量、冲突量和无效量。
+- 当前完整执行扫描了 `6` 个展开目录、`6` 个归档和 `178770` 个源候选，统一保留 `89385` 条样本；其中 lemon `17872` 条、tao `43817` 条、zhuo `27696` 条。独立逐文件复核确认 `89385` 个唯一 ID 与 `89385` 个唯一 SHA-256 完全对应，ID 冲突和无效样本均为 `0`。
+
+## Clean V3 清洗、严格留出与候选训练补充
+- `android/analysis/build_deduplicated_clean_v3.py`：只读取 `data/deduplicated_raw/manifest.csv` 引用的 `89385` 条 JSON，不扫描目录中的报告 JSON。脚本提取四分类标签、采集者、设备、日期、原始 session、触摸/IMU 窗口和质量指标，原始 JSON 保持只读。
+- Clean V3 身份规则：`data/lemon/lemon`、`data/tao/tao` 与 `data/collections/*/raw` 来源目录是采集者和 collection 的权威来源，JSON 内 `collector.userName` 仅作审计字段。全部 `89385` 条均匹配到唯一来源目录，其中 `26955` 条内嵌采集者与来源目录不一致；训练分组使用来源目录身份，避免把 7 月 22 日交叉采集错误归到设备内保存的用户名。
+- Clean V3 质量规则：上下文按设备、运动状态、手指和轻重标签分组，触摸位移、冲击上限和触摸持续帧使用 median、MAD、p95 与 p05 计算，不再使用全设备统一的“重触少于四帧”规则。非法标签、不可用冲击窗口、多指和拖动/取消样本拒绝训练；半径缺失、归一化回退和上下文异常进入 review 并使用 `0.2~0.6` 有界权重。
+- Clean V3 全量结果：`84778` 条 high quality、`2729` 条 review、`1878` 条 rejected，共 `87507` 条质量可训练样本。session 内按 `0.25s` 去除连续冗余后保留 `79113` 条，减少 `8394` 条；全部样本分为 `147` 个 session。
+- `android/analysis/build_clean_v3_folds.py`：优先使用 `collectionSessionID`，旧数据缺失时按 collection 内相邻样本超过 `60s` 切分 session。生成 `5` 个采集者-设备 domain folds、`6` 个 collection folds与 `1` 个 temporal-tail fold；所有 fold 四类完整，检查确认没有 session 同时进入 train 和 valid。
+- `train_android_finger_four_class_cnn.py` / `baseline_imu`：新增 11 通道候选，保留归一化坐标，并将九个 IMU 通道变换为相对当前样本前五帧中位数与有界噪声尺度的变化量；不读取标签、其他样本、未来样本或绝对接触尺寸。
+- `android/analysis/run_clean_v3_probe_experiments.py`：可恢复执行 `old13`、`patch21`、`relative_touch`、`baseline_imu` 四候选乘五个严格 domain folds，使用 30 epoch、patience 8、batch 128、seed 22 和训练折 collection-class 平衡权重。20 个 probe 均已完成，报告位于 `models/deduplicated_clean_v3_20260728/`。
+- 严格 domain probe 结果：`baseline_imu` 平均 balanced accuracy 约 `42.62%`、最差折约 `32.64%`；`patch21` 约 `42.52% / 25.77%`；`old13` 约 `40.36% / 33.34%`；`relative_touch` 约 `39.37% / 27.84%`。最佳候选未达到平均 `70%`、最差折 `55%`、最差类别召回 `45%` 的门槛，多数 fold 在较早 epoch 达峰，因此停止 120 epoch 多 seed 扩展，不生成或安装新的 Android 默认模型。
+- `AispectImpactCNNModelCatalog.json`：为真机人工对照加入五个 Clean V3 `patch21` domain-holdout probe，分别对应 lemon-Xiaomi、tao-LE2110、tao-PHK110、zhuo-LE2110、zhuo-PHK110 留出域；模型只作为可切换实验项，catalog 第一项和 `crossDevice` 的 `DEFAULT_MODEL_ID` 继续保持 `full_old13_seen_devices_current_preprocessed_all_118`，不会因实验模型指标不足而自动替换默认模型。
+
+## Clean V2 旧流程全量复训补充
+- `test_train_android_first_touch_mlp.py`：定义按下期首帧实验模型的训练契约，要求训练端只读取 `touchFrames[0]`，使用十个可在 Android `ACTION_DOWN` 同步重建的无量纲特征，并验证缺失接触椭圆时使用 `0.012` 默认 sigma、分层切分可重复、导出 MLP 权重尺寸可被端侧校验。
+- `train_android_first_touch_mlp.py`：新增独立首帧四分类 MLP 训练入口，读取 Clean V2 manifest 的全部合格样本和 `sample_weight`，提取归一化位置、压力、size、接触椭圆 sigma、对数长宽比、对数面积与方向正余弦十特征；支持特征缓存、随机分层验证和全量拟合，导出单隐藏层权重、scaler、标签顺序及训练报告，不修改现有抬起期 CNN 管线。
+- `test_train_android_first_touch_mlp.py`：新增全量拟合状态测试，要求无验证集时每个 epoch 都更新导出状态，确保指定 72 epoch 时实际导出第 72 轮，而不是按训练集分数回选较早轮次。
+- `should_update_best_state`：首帧训练器在存在验证集时仍按 balanced accuracy 保存最佳轮次；`split_strategy=all` 时无条件更新为当前 epoch，使全量模型严格使用验证阶段选出的训练轮数。
+- `AispectFirstTouchClassifierTest`：定义 Android 首帧分类器契约，逐值核对十个训练特征、标准化后单隐藏层 ReLU MLP 的四分类 softmax 输出，以及模型资源不可用时返回 `null` 而不影响现有抬起推理。
+- `AispectFirstTouchClassifier`：新增可复用首帧 MLP 推理器，从独立 JSON asset 读取 scaler、单隐藏层权重和四类顺序；端侧直接从 `AispectTouchFrame` 与单帧 `AispectContactPatch` 重建训练端十特征，资源或尺寸无效时返回空结果，不耦合现有 CNN catalog。
+- `AispectCollectionController.collectTouchFrames`：`ACTION_DOWN` 当前帧落入 `activeTouchFrames` 后立即调用首帧分类器，以 `collector_early_prediction_ready` 发布一次实验早期预测；抬起后的 `finalizeCompletedTouch` 仍运行当前选中 CNN 并覆盖为最终结果，早期事件不满足完成事件条件，因此不会进入现有最终召回计数。
+- `models/first_touch_early_v1_20260731`：保存全部 `79878` 条 Clean V2 样本的首帧特征缓存、随机验证模型与 epoch `72` 全量模型。随机 `25%` 验证 balanced accuracy 约 `47.99%`，四类召回约为 `thumb_light 28.25% / thumb_heavy 53.76% / index_light 69.08% / index_heavy 40.86%`；该结果仅高于随机基线，明显低于抬起期模型，因此只作为按下瞬间实验反馈，不替换或参与选择最终 CNN。
+- `AispectFirstTouchModel_first_touch_early_v1.json`：将首帧全量 MLP 作为独立 asset 导入，SHA-256 与训练产物一致；模型 ID 不进入现有 CNN catalog，避免用户模型切换同时改变最终抬起模型。
+- 首帧真机时序验证：在 OnePlus LE2110 `aa95546c` 上执行 10 秒持续按压，按住第 1 秒截图显示 `first_touch_early_v1`，抬起后截图显示 `full_data_clean_v2_old13_all_118`，证明早期事件发生在抬起前且最终事件正常覆盖。该样例人工标签为拇指轻点，早期模型误判拇指重点 `0.7996`，最终模型正确输出拇指轻点 `0.6327`；截图保存在 `models/first_touch_early_v1_20260731/device_early_press.png` 与 `device_final_press.png`，用于明确记录原型能力边界。
+- `test_first_touch_ui_deployment.py`：新增按下期模型可见性回归契约，要求控制器公开首帧模型 ID，面板常驻显示“按下期默认模型”，并把原模型切换区域明确标注为“抬起期 CNN 模型切换”，避免独立 MLP 未进入 CNN catalog 时被误认为没有安装。
+- `AispectFirstTouchClassifier.modelId` / `AispectCollectionController.firstTouchModelId`：新增只读首帧模型标识接口，不允许通过 CNN 模型切换器修改独立 MLP。
+- `MainActivity` 模型面板：常驻显示“按下期默认模型”及 `first_touch_early_v1`，原 catalog 控件标题改为“抬起期 CNN 模型切换”；用户无需持续按住才能确认早期模型已安装，两个不同格式的模型仍保持独立生命周期。
+- `test_latest_model_deployment.py`：crossDevice 最新模型部署契约改为检查 `full_data_clean_v2_old13_all_118` 必须同时成为 flavor 默认模型与 catalog 第一项，并要求对应 scaler、weights 资产实际存在；部署实现前该测试用于产生明确失败，避免只修改显示名称或只复制单个文件。
+- `AispectImpactCNNModelCatalog.json` / `crossDevice` 产品变体：新增并置顶 `full_data_clean_v2_old13_all_118`，导入同名 scaler 与 weights，并仅将 crossDevice 的 `DEFAULT_MODEL_ID` 切换到该模型；standard flavor 默认模型与全部旧模型保持不变，便于真机同会话 A/B 测试。
+- 当前 `data/deduplicated_raw/manifest.csv` 与旧流程输入 `full_all_collections_manifest.csv` 均为 `89385` 条、`89385` 个唯一 ID，双向 ID 差集均为 `0`；因此本轮不存在尚未进入旧流程的新样本，不重复清洗或复制原始 JSON。
+- 继续使用旧流程已经生成的 grouped Clean V2 训练视图，共 `79878` 条且 ID 不重复：`44058` 条 high quality、`8275` 条 review、`27545` 条 legacy unscored；四类分别为 `thumb_light 22862 / thumb_heavy 20856 / index_light 18101 / index_heavy 18059`，全部路径存在。
+- `models/full_data_clean_v2_old13_20260728/validation_120`：完全复刻 old13、`-5...+9`、缺帧补零、质量样本权重与类别权重、batch `256`、学习率 `0.001`、weight decay `0.0001`、seed `22`、随机 `25%` 验证和 `120` epoch。最佳 epoch 仍为 `118`，验证平衡准确率约 `79.14%`，与历史同口径 `79.15%` 相差约 `0.007` 个百分点；四类召回约为 `thumb_light 78.22% / thumb_heavy 74.43% / index_light 79.93% / index_heavy 83.99%`。
+- `models/full_data_clean_v2_old13_20260728/final_all`：使用验证阶段选出的 `118` epoch 对全部 `79878` 条合格数据重新训练，模型 ID 为 `full_data_clean_v2_old13_all_118`。全量训练平衡准确率约 `85.82%` 只用于确认拟合状态，不视为验证或真机准确率；本轮不修改 Android catalog 和默认模型，待同一手机同一操作会话完成旧模型与该模型 A/B 测试后再决定是否接入。
 
 ## 历史按下锚点数据集补充
 - `android/analysis/build_historical_down_anchor_datasets.py`：只读扫描 `data/deduplicated_raw/manifest.csv` 指向的去重原始 JSON，分别生成 A、B 两套按下锚点数据集，不修改任何原始 JSON。按下时间优先读取 `touchFrames[0].eventTimeMillis`，缺失时回退到 `touchEvents[0].timestamp`。
@@ -163,6 +244,16 @@
 ---
 
 修改日志：
+- 2026-08-09：将 Android 旧 Contact Patch/归一化/时间特征读取集中到 `aispect/legacy/AispectLegacyFeatureBuilder`，主分类器只按 feature contract 分派；causal 合同继续仅使用双时间门 ZOH 与逐帧 touchFrames。
+- 2026-08-04：Android 控制器创建时、iOS 页面可见时预热 IMU 滚动缓存，确保验证模式在 `ACTION_DOWN` 前已有 `-5` 帧；页面销毁或离开时停止传感器。
+- 2026-08-04：修正 iOS 传感器不可用或停止时仍能结束当前原始采集会话，保留 `windowComplete` 真实状态而不丢失会话收尾。
+- 2026-08-04：移除 iOS 旧冲击回调与旧触摸窗口状态变量，避免按下锚点采集链路再次合成重触输出。
+- 2026-08-04：补齐 iOS 按下窗口就绪状态回调和统一本地化文案；旧 iOS CNN 推理器改为显式未就绪占位，保留历史资源但不再计算旧特征。
+- 2026-08-04：按下/抬起双锚点采集正式统一为 schema v5；Android 与 iOS 均以 `ACTION_DOWN` 为 `frameIndex=0`，等待真实 `-5...+9` 15 帧窗口并只发布一次“模型待训练”状态，抬起后独立补采 `lift+15` 保存原始序列。本轮不重新训练、不启用旧模型。
+- 2026-08-04：新标准 IMU JSON 移除 `delta` 与 `maxAbsDelta` 派生字段，保留原始加速度、陀螺仪、重力、触摸归一化与时间对齐字段；旧数据、旧模型资源和历史分析目录不修改、不混入新标准训练集。
+- 2026-07-28：将五个 Clean V3 `patch21` domain-holdout probe 的 scaler/weights 加入 Android 模型 catalog，保留现有默认模型，用于 `crossDevice` App 在 LE2110 真机上手动切换对照。
+- 2026-07-28：基于 `89385` 条唯一原始数据建立 Clean V3，修正 `26955` 条采集者元数据冲突，生成 `87507` 条质量训练视图、`79113` 条 session 去冗余训练视图和 12 个无 session 泄漏严格 folds；完成 20 个四候选 domain probe，因跨域指标未达门槛而不替换端侧模型。
+- 2026-07-27：新增原始触摸数据统一去重提取器，将 legacy、四个 collection 展开目录及六个归档汇总到 `data/deduplicated_raw`；按 ID 与 SHA-256 双重去重后保留 `89385` 条唯一 JSON，并生成 manifest、重复审计和汇总报告。
 - 2026-01-23：初始化 UIKit 主容器、核心数据模型、Aispect 触摸骨架与基础 UI 组件结构。
 - 2026-01-23：加入虚拟列表组件与 Aispect 采样平滑策略，侧栏列表改为滚动驱动的可视化复用。
 - 2026-01-23：补充虚拟列表在滚动与布局变化时的可见项位置刷新。
@@ -315,4 +406,65 @@
 - 2026-06-25：针对手机实测食指/拇指同强度混淆，新增 OnePlus 四分类时间留出复核；确认随机切分因连续采集段泄漏而高估 `old13_raw_radius`，端侧默认四分类模型改为时间留出更稳的 `oneplus_four_class_hard_core_old13`，并保留 raw radius 版本作为第二项对照。
 - 2026-06-25：补采后从 OnePlus PHK110 导出 `4641` 条原生 JSON，修正四分类数据构建脚本优先使用真实 `finger_type`，训练和消融脚本新增 temporal split；基于 hard_v2 每类 `321` 条样本完成 `25%` 与 `10%` 最新尾段时间留出全量消融，并将 `10%` 留出当前第一名 preset 的 nearfull 装机版 `oneplus_four_class_after_recollect_hard_nearfull_old13_raw_radius` 置顶 catalog 且设为端侧默认四分类模型，`temporal10` 训练版保留为第二项对照。
 - 2026-06-26：修复四分类训练未生效使用 `sample_weight` 的缺陷，重新跑 weighted temporal10 核心消融；`old13_multichannel` 以约 `87.50%` 平衡准确率、`81.25%` 最小召回和更少同强度手指互混胜出，新增 weighted nearfull 装机模型 `oneplus_four_class_after_recollect_hard_nearfull_weighted_old13_multichannel` 并切为端侧默认。
+- 2026-07-21：端侧默认模型切换为 Lemon+Tao 四分类验证集表现最佳的 `lemon_tao_full4_enhanced_patch21_no_confidence`，保留其他模型作为可选对照。
+- 2026-07-21：根据 OnePlus 实机验证反馈，将端侧默认模型切回针对 OnePlus 设备训练的 `oneplus_four_class_after_recollect_hard_nearfull_weighted_old13_multichannel`，Lemon+Tao 模型保留为可选对照。
+- 2026-07-22：Android 训练采集新增用户名称和匿名稳定设备标识；用户名称由采集者填写并在会话中锁定，设备标识首次运行时生成并保存在私有偏好设置，新样本使用 `schemaVersion: 3` 并写入 `collector.userName` 与 `collector.deviceId`。
+- 2026-07-23：新增跨设备统一训练 manifest 构建脚本，统一旧 Lemon/Tao 与新 LE2110/PHK110 高质量数据字段；四分类训练器新增 `predefined` 切分，支持把 PHK110 整体保留为未见设备验证集，避免随机切分造成设备与会话泄漏。
+- 2026-07-23：Android App 新增 `crossDevice` 产品变体，使用独立包名并默认加载旧+新已见设备训练的 `full_old13_seen_devices_120`；标准变体继续保留原包名和原默认模型，两个 App 可在同一手机并存测试。
+- 2026-07-24：完成四批新增数据的设备场景自适应清洗、软权重训练视图、五分钟会话分组和时间冗余压缩；四个 collection 留出折均确认无重复 ID 和跨 split 会话组。
+- 2026-07-24：四分类训练器增加带输入签名的样本缓存与验证平衡准确率早停；使用前天同组超参数和 `batch_size=128` 完成四折严格留出及随机对照，确认随机验证约 `83.77%` 但整批留出均值不足上线要求，未替换 Android 端侧模型。
+- 2026-07-24：仅使用现有数据完成 `imu11_no_time`、`invariant_shape`、`relative_touch` 三种设备去偏输入的 12 个严格留出实验，并加入训练折 collection-class 平衡权重；最优诊断方案 `relative_touch` 平均约 `44.72%`，未达到部署门槛，未补采、未合成数据、未替换端侧模型。
+- 2026-07-24：四分类训练器改为完整张量 CPU 常驻、训练和验证按批搬入 CUDA，修复 Windows WDDM 中断恢复后整折张量映射导致的小额显存分配失败和 `resource already mapped`。
+- 2026-07-24：核对并完全复刻 `Full old13 seen devices 120` 的训练方式，使用当前预处理后的 `79878` 条数据训练 `full_old13_seen_devices_current_preprocessed_120`；随机验证平衡准确率约 `79.15%`，较旧模型约 `81.20%` 下降约 `2.05` 个百分点，该模型保留为最终全量训练的 epoch 选择依据。
+- 2026-07-24：将最终全量模型 `full_old13_seen_devices_current_preprocessed_all_118` 接入 Android assets，并设为 `crossDevice` 变体默认模型；带随机验证版本、旧跨设备模型和标准变体默认配置继续保留用于对照。
+- 2026-07-24：根据当前 pooled old13 随机验证的最佳 epoch `118`，新增 `split_strategy=all` 并使用全部 `79878` 条现有预处理数据训练最终模型 `full_old13_seen_devices_current_preprocessed_all_118`；报告明确 valid count 为零，模型产物已导入 `crossDevice` App 并安装到 PHK110 真机。
+- 2026-07-28：确认当前去重目录与 7 月 24 日旧流程输入的 `89385` 个 ID 完全一致，按原 grouped Clean V2 + pooled old13 参数重新训练；随机验证仍在 epoch `118` 达到约 `79.14%` 平衡准确率，随后生成全量 `79878` 条模型 `full_data_clean_v2_old13_all_118`，暂不接入 Android，避免未经同会话真机 A/B 直接替换。
+- 2026-07-28：将 `full_data_clean_v2_old13_all_118` 的 scaler 与 weights 导入 Android assets、置顶 catalog，并设为 crossDevice flavor 默认模型；42 个分析测试及 Gradle 构建通过后，将新 APK 覆盖安装到 OnePlus LE2110 `a2d0a964`，真机 UI 的 CNN 诊断与验证模式均确认当前模型 ID 为该模型且已完成推理，standard flavor 默认模型和全部旧模型保持不变。
+- 2026-07-31：基于全部 `79878` 条 Clean V2 样本训练 `ACTION_DOWN` 首帧十特征实验 MLP，随机验证 balanced accuracy 约 `47.99%`；新增 Android 独立首帧分类器，在按下当前帧落盘到内存后立即发布早期预测，抬起后继续由现有 `full_data_clean_v2_old13_all_118` 输出最终结果，早期预测不计入最终召回。
+- 2026-07-31：将首帧实验模型安装到 OnePlus LE2110 并用 10 秒持续按压完成抬起前后截图验证；早期模型在按住阶段可见、最终模型在抬起后覆盖，本次早期样例发生轻重点误判，与离线约 `47.99%` balanced accuracy 一致，因此功能可测试但不作为正式分类结果。
+- 2026-07-31：修复首帧 MLP 已运行但未出现在 CNN catalog 列表而被误认为没有安装的问题；模型面板新增常驻“按下期默认模型 first_touch_early_v1”，原切换列表改名为“抬起期 CNN 模型切换”。49 个分析测试、4 个 Java 测试和 crossDevice 构建通过后覆盖安装到 LE2110，真机 UI 层级确认三个目标文本同时可见。
+- 2026-08-02：采集链路改为按下/抬起双锚点原始窗口，保存 `down-15...lift+15` 的可变长度真实 IMU 序列；训练窗口与端侧固定 CNN 输入继续分离，Android/iOS 同步记录双锚点元数据并在中断时标记不完整、不补零伪造原始帧。
 - 2026-07-31：新增历史按下锚点 A/B 数据集筛选脚本与审计结构；A 保留按下时刻位于真实 IMU 覆盖范围内的样本，B 从 A 中进一步保留可完整提取真实 `-5...+9` 连续窗口的样本，明确排除全零补位帧且不修改源 JSON。
+- 2026-08-06：四分类训练器新增 schema v5 原始目录计划准备、按下/抬起锚点对照、跨运动场景留出、session 时间尾段留出及按按压时长分组报告；原始 JSON 保持只读，抬起时长不作为端侧模型输入。
+- 2026-08-07：新增 schema v5 按下锚点完整因子消融调度器及测试，按 12 个特征预设 x 7 个窗口 x 3 个运动场景严格留出统一管理训练；已完成项按完整模型产物跳过，结果仅保留离线评估，不修改 Android 默认模型。
+- 2026-08-07：新增按下期因果窗口过滤、确定性训练开关和 84 个时间窗口 x 3 个场景留出的 252 次消融运行器；完成全部严格训练，`-1...+2` 四帧窗口在当前数据上胜出，未自动部署模型。
+- 2026-08-07：新增 84 个按下期窗口的 CSV 总览表，合并三个运动状态留出折指标、综合平均/最差指标、覆盖率与前十标记，便于直观检查候选窗口的离散分布。
+- 2026-08-07：将 84 窗口 CSV 总览表改为中英对照表头，并将前十布尔标记改为“是 (Yes) / 否 (No)”，保留全部排名和数值指标不变。
+- 2026-08-07：新增 4至15 帧密集窗口遍历计划，保留原84窗口计划作为默认；新计划完整遍历 114 种前/后帧分配，并扩展为342次三场景留出训练任务。
+- 2026-08-07：按工作进程并行训练需求，将密集窗口调度改为窗口级并发；每个窗口内三折串行以保护特征缓存，不同窗口以六组并行完成本轮训练，主调度进程统一写入进度。
+- 2026-08-07：Android 原始采集升级为 schema v6。每个 IMU 帧记录硬件与接收 `elapsedRealtimeNanos`，每个触摸帧记录换算后的事件与接收单调时间，记录级 `timeAlignment` 明确按下/抬起时间和 ZOH 因果可用性规则；双锚点窗口同步改用共同单调时间轴。
+- 2026-08-09：按下期因果合同增加触摸事件时间与 IMU 硬件时间的第二道未来门；缺少 IMU/触摸事件或接收时间时拒绝构建。基础合同升级为含 `touch_valid` 的 `causal_imu12_v1`，完整触摸合同继续使用 `causal_imu11_touch9_v1`。
+- 2026-08-09：新四分类训练器与旧 schema v5 训练脚本解除主动依赖，通用训练工具移至 `training_common.py`，旧路径标记为 legacy-only；训练分割出口强制拒绝缺失或跨 split 的原始 session。
+- 2026-08-07：按下期训练窗口改为强制活动按压约束，旧样本缓存以 `causalPressActiveV1` 失效；252 窗口消融新增训练/验证计数审计、总可输出覆盖率、等待延迟和四目标 Pareto 前沿，全因子命令同步显式传入 `--require-press-active`。
+
+## 跨设备因果时间网格补充
+- `build_causal_time_grid_dataset.py`：新增第二层离线导出器。它只读 schema v6 原始 JSON，以源文件 SHA-256 去重并把每条来源唯一归档为 accepted 或 rejected；接受样本分别输出 `causal_time_grid_imu11_v2` 的 `[9,11]` 与 `causal_time_grid_imu11_touch9_v2` 的 `[9,20]` JSONL 矩阵。输出同时冻结 source manifest、拒绝原因、网格质量、特征合同和源哈希清单；不修改源 JSON，不将时间戳或整次触摸汇总写入矩阵。
+- `build_time_grid_training_dataset.py`：新增第三层训练清洗构建器。它按 source SHA-256 逐条核对 `[9,11]` 与 `[9,20]` 第二层矩阵及来源 manifest，生成可训练的 `causal_time_grid_imu11_v2` 和 `causal_time_grid_imu11_touch9_mask6_v3` `[9,26]` 视图。后者仅追加压力、面积、长轴、短轴、方向、指针数的逐帧可用性掩码；训练候选按 `platform + collectorDeviceId + sessionId` 严格分组，已知多指触控进入排除清单，完全相同的同组同类输入才降权。清洗报告显式标记 session-标签绑定和全量缺失的触摸字段，训练脚本可据此禁用无信息通道。
+- `train_time_grid_strict_cnn.py` / `run_time_grid_strict_baselines.py`：新增第四层严格训练入口。训练器从冻结 JSONL 和三折 session manifest 读取数据，`touch23` 固定删除全量缺失的方向三通道，scaler 只在训练折拟合并对缺失触摸值保持零；轻量一维 CNN 使用 AdamW、梯度裁剪、早停和有界 session/class 权重。调度器固定运行 `imu11` 与 `touch23` 各三折，输出逐类召回、最差折、泛化差距、参数量和确定性复训报告，未通过候选门槛时不部署模型。
+- `train_pose_invariant_variants.py`：新增全量姿态不变双模型训练入口，复用冻结的 `training_touch26.jsonl`、GroupNorm CNN、鲁棒 scaler、session/class 权重和 80 轮无早停配置。`no_gravity` 生成 `[9,20]` 输入并完全删除 `gravity.x/y/z`；`delta_gravity` 生成 `[9,23]` 输入，以每个时间槽的重力减去前一时间槽重力，第一槽固定为零，只保留旋转变化。两组产物均标记为 `all_data_fit_only`、`deploymentAllowed=false`，不覆盖现有模型或 Android 默认配置。
+- `cross_device_causal_features.py`：新增 `causal_time_grid_imu11_v2` 与 `causal_time_grid_imu11_touch9_v2` 契约。以 `timeAlignment.downEventElapsedRealtimeNanos` 为 `0ms`，固定重采样到 `-15,-10,-5,0,5,10,15,20,25ms` 九个物理时间槽；IMU 连续通道按硬件时间左右帧线性插值，端点缺少右支撑、间隔超过 `max(2*5ms,4*median_dt)`、时间戳异常或抬起早于 `+25ms` 时拒绝样本。
+- `cross_device_causal_features.py`：跨平台输入必须声明平台、传感器来源、单位、轴坐标系与 `transformVersion`。Android 含重力加速度计只有在 `gravityAvailable=true` 且离线执行加速度减重力后才允许进入 v2；iOS `user_acceleration`、Android 线性加速度统一为 `m/s^2`，陀螺仪统一为 `rad/s`，轴变换矩阵必须是正交单位矩阵（允许镜像）。
+- `cross_device_causal_features.py`：触摸输入只读取逐帧 `touchFrames[]`。按触摸帧接收时间相对 IMU 接收时间做零阶保持，并额外检查触摸事件时间不能晚于目标硬件时间；触摸屏幕尺寸按像素/point/毫米单位归一化，缺失压力、面积、半径或方向时写入数值占位并在 `missingMasks` 中保留独立可用性标记，根级 Contact Patch、整次汇总和抬起后字段不进入 v2 特征。
+- `train_android_finger_four_class_cnn.py`：时间网格训练强制使用九个物理槽和按下期活动约束（抬起时间必须不早于 `down+25ms`），样本缓存签名记录平台适配版本、坐标变换版本、网格速率、偏移、插值和间隔规则；scaler/training report 写入相同 `featureContract` 元数据，避免 v2 结果误走 v1 原始帧索引路径。
+- `AispectCausalPressFeatureBuilder` / `AispectCollectionController`：Android 端按 scaler 的 `featureContract` 显式分派 v1/v2；v2 只有在真实 IMU 数据覆盖正端点并具备右插值支撑时才发布预测，缺少触摸双时钟或窗口质量不合格时不补零、不外推。
+- `AispectCausalPressFeatureBuilder`：Android 时间网格增加两个姿态不变推理合同。`causal_time_grid_touch7_mask5_no_gravity_v1` 从原 23 通道因果矩阵中删除索引 `8..10` 的绝对重力，输出 `[9,20]`；`causal_time_grid_imu11_touch7_mask5_delta_gravity_v1` 保持 `[9,23]`，将三个重力通道替换为当前网格减前一网格的因果差分，第一网格固定为零。两者复用原触摸逐帧值、可用性掩码和 GroupNorm CNN 运行时。
+- `AispectTimeGridGroupNormRuntime`：触摸测量值的缺失掩码通过 `featureNames` 动态查找对应的 `pressure_available`、`size_available`、`major_available`、`minor_available` 或 `pointer_count_available`，不依赖 23 通道合同中的固定列号。20 通道无重力合同删除三个绝对重力列后仍能使用同一归一化运行时；声明需要触摸可用性但缺少对应掩码通道的模型会在加载时被拒绝。
+- 2026-08-09：开始落地跨设备 v2 因果特征契约，补齐元数据拒绝、触摸双时钟校验、固定物理时间网格支持闸门、含重力加速度计线性化和训练缓存契约签名；旧 v1 模型与原始 schema 保持兼容且不自动替换。
+- 2026-08-09：补充跨设备目标与数据结构总文档 `goal文档.md`；统一 Python/Android 的间隔中位数规则、缺失指针/触摸形状掩码、原始坐标回退归一化和按下期抬起端点过滤。
+- 2026-08-09：Android 加速度计回退路径新增同一单调时间轴的重力对齐门，未获得有效重力支撑时不写入伪线性加速度帧。
+- 2026-08-09：时间网格构建结果增加 `gridQuality`（实际采样率、中位间隔、最大间隔、覆盖时长和接受状态），用于训练 manifest 与跨设备严格留出审计。
+- 2026-08-09：训练端样本载入支持保留每条 v2 样本的 `gridQuality`，避免只留下矩阵而丢失跨设备质量审计信息。
+- 2026-08-09：时间间隔质量统计改为只使用固定物理窗口及其左右支撑帧，并与 Android 使用相同的上中位数规则，避免窗口外异常间隔污染拒绝阈值。
+- 2026-08-09：统一无触摸占位行的可用性掩码结构，`pointerCount` 与压力/面积/半径/方向字段始终有明确的缺失标记。
+- 2026-08-10：新增 schema v6 第二层因果时间网格离线导出器和行为测试；源 JSON 通过 SHA-256 冻结，重复来源与不可构建窗口进入拒绝清单，训练矩阵只来自显式特征合同的固定物理时间网格。
+- 2026-08-10：新增第三层时间网格训练清洗器和测试；训练输入与第二层 source SHA-256 一一对应，触摸缺失掩码扩展为 `[9,26]` 合同，session 严格折不允许同组泄露，当前阶段不产生或部署模型。
+- 2026-08-10：训练清洗报告增加 `sessionLabelBinding`、每类 session 数和全量缺失掩码字段，使 session 与标签耦合、无信息通道成为训练前可机器检查的风险门槛。
+- 2026-08-10：完成 `0810_time_grid_strict_baseline` 六次严格训练与一次确定性探针；`imu11` 平均 balanced accuracy `40.23%`，`touch23` `42.68%`，但两者平均泛化差距分别为 `52.99%` 和 `51.75%`，均超过过拟合门槛，因此聚合报告将决策锁定为保留基线、不允许部署。
+- 2026-08-10：新增 `train_time_grid_all_data_ablation.py` 与 `run_time_grid_channel_effectiveness_ablation.py`。该独立入口固定使用全部 eligible 样本、80 epochs、原严格基线的优化器与样本权重，并最多以 7 个独立进程并行运行 9 个通道合同；不读取 session 折、不早停，所有产物显式标记 `all_data_fit_only` 和 `deploymentAllowed=false`。输出目录保存严格基线配置快照、脚本 SHA-256、每合同权重/scaler/训练历史及训练集拟合排名；其用途仅限通道冗余与拟合差异审计，不能用于部署或泛化结论。
+- 2026-08-10：全量通道消融合同增加唯一性测试；将与 `touch15_geometry` 重复的 `imu15_geometry_ratio` 替换为 `imu12_touch_valid`，用于独立测量触摸因果可用状态的拟合贡献。首轮含重复合同的训练产物仅保留为无效审计副本，不作为最终排名依据。
+- 2026-08-10：Android 增加实验性 `causal_time_grid_imu11_touch7_mask5_v3` 合同，固定输出九个物理时间槽的 `[9,23]` 因果矩阵：11 个位置/IMU 通道、5 个触摸数值通道、指针数、触摸有效位及 5 个逐帧可用性掩码。新增独立 `time_grid_groupnorm_cnn_v1` 运行时，严格执行 `Conv1d -> GroupNorm -> GELU -> Conv1d -> GroupNorm -> GELU -> MeanPool -> Linear`，按导出的逐通道 scaler 做缺失掩码、鲁棒缩放与截断。模型 `time_grid_all_data_touch23_experimental` 仅加入可选目录，不替换默认模型；其来源为全量拟合通道消融产物，明确标记 `evaluationScope=all_data_fit_only` 与 `deploymentAllowed=false`，仅可用于端侧兼容性和同条件真机验证。
+- 2026-08-10：新增姿态不变双模型全量训练器与行为测试，分别训练删除绝对重力的 `no_gravity` `[9,20]` 模型，以及用相邻物理时间槽因果差分替换绝对重力的 `delta_gravity` `[9,23]` 模型；两组共同使用 2,582 条 eligible 样本、80 轮训练和两个并行进程，产物独立保存且不自动部署。
+- 2026-08-10：Android 端新增无绝对重力与重力因果差分两个时间网格合同，通用 GroupNorm 导出器支持 20/23 通道合同；两套全量实验模型加入可选 CNN catalog，不替换默认模型，并构建 standard debug APK 安装到当前 ADB 设备用于真机 A/B。
+- 2026-08-10：修复按下期时间网格模型的运行链路：模型推理改为直接读取完整 IMU 滚动缓存，经固定物理时间网格重采样后输入，旧模型继续使用历史 `-5...+9` 帧窗口；验证模式在抬起后保留最近一次按下期预测，并持续预热 IMU，直到下一次 `ACTION_DOWN` 才清空结果，避免有效预测被收尾流程覆盖。
+- 2026-08-10：修复 20 通道 `no_gravity` 实验模型真机推理时因触摸可用性掩码仍使用 23 通道固定索引而越界崩溃的问题；GroupNorm 运行时改为按特征名动态解析掩码列，并增加完整 `predict()` 回归测试。模型权重与 scaler 数值参数不变，无需重新训练。
+- 2026-08-10：Android 原始双锚点窗口升级为 `85ms + 15帧` 双下限；抬起后改为 85ms 首次检查、8ms 条件轮询和 500ms 超时，schema v6 新增版本化 `captureWindow` 审计对象。按下期九槽模型输入保持不变，iOS 同构改造仍待完成。

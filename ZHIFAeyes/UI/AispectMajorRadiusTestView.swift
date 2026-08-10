@@ -108,6 +108,7 @@ final class AispectImpactTestView: UIView {
         impactSlider.minimumValue = 0.05
         impactSlider.maximumValue = 1.0
         impactSlider.value = 0.25
+        impactSlider.isEnabled = false
         impactSlider.isContinuous = true
         // 中文注释：滑动即刷新阈值，便于现场调参。
         impactSlider.addTarget(self, action: #selector(handleImpactSlider(_:)), for: .valueChanged)
@@ -351,13 +352,11 @@ final class AispectImpactTestView: UIView {
             liftText,
             event.timestamp
         )
-        impactLabel.text = String(format: "impact threshold %.3f", impactSlider.value)
+        impactLabel.text = localized("impact_threshold_format")
     }
 
     func setImpactThreshold(_ value: CGFloat) {
-        impactSlider.value = Float(value)
-        let format = localized("impact_threshold_format")
-        impactLabel.text = String(format: format, impactSlider.value)
+        impactLabel.text = localized("impact_threshold_format")
     }
 
     func setImpactSampleRate(_ hz: Double) {
@@ -452,10 +451,7 @@ final class AispectImpactTestView: UIView {
     }
 
     @objc private func handleImpactSlider(_ sender: UISlider) {
-        let value = CGFloat(sender.value)
-        let format = localized("impact_threshold_format")
-        impactLabel.text = String(format: format, sender.value)
-        onImpactThresholdChanged?(value)
+        impactLabel.text = localized("impact_threshold_format")
     }
 
     @objc private func handleCopyLog() {
