@@ -19,6 +19,21 @@ final class AispectTouchAxisReader {
         final boolean hasPressureRange;
         final boolean hasSizeRange;
         final boolean hasOrientationRange;
+        final boolean touchMajorObserved;
+        final boolean touchMinorObserved;
+        final boolean toolMajorObserved;
+        final boolean toolMinorObserved;
+        final boolean pressureObserved;
+        final boolean sizeObserved;
+        final boolean orientationObserved;
+        final boolean touchMajorSynthesizedOrUnknown;
+        final boolean touchMinorSynthesizedOrUnknown;
+        final boolean toolMajorSynthesizedOrUnknown;
+        final boolean toolMinorSynthesizedOrUnknown;
+        final boolean pressureSynthesizedOrUnknown;
+        final boolean sizeSynthesizedOrUnknown;
+        final boolean orientationSynthesizedOrUnknown;
+        final AispectTouchInputMetadata inputMetadata;
 
         Sample(
                 float pressure,
@@ -34,7 +49,22 @@ final class AispectTouchAxisReader {
                 boolean hasToolMinorRange,
                 boolean hasPressureRange,
                 boolean hasSizeRange,
-                boolean hasOrientationRange
+                boolean hasOrientationRange,
+                boolean touchMajorObserved,
+                boolean touchMinorObserved,
+                boolean toolMajorObserved,
+                boolean toolMinorObserved,
+                boolean pressureObserved,
+                boolean sizeObserved,
+                boolean orientationObserved,
+                boolean touchMajorSynthesizedOrUnknown,
+                boolean touchMinorSynthesizedOrUnknown,
+                boolean toolMajorSynthesizedOrUnknown,
+                boolean toolMinorSynthesizedOrUnknown,
+                boolean pressureSynthesizedOrUnknown,
+                boolean sizeSynthesizedOrUnknown,
+                boolean orientationSynthesizedOrUnknown,
+                AispectTouchInputMetadata inputMetadata
         ) {
             this.pressure = pressure;
             this.size = size;
@@ -50,6 +80,21 @@ final class AispectTouchAxisReader {
             this.hasPressureRange = hasPressureRange;
             this.hasSizeRange = hasSizeRange;
             this.hasOrientationRange = hasOrientationRange;
+            this.touchMajorObserved = touchMajorObserved;
+            this.touchMinorObserved = touchMinorObserved;
+            this.toolMajorObserved = toolMajorObserved;
+            this.toolMinorObserved = toolMinorObserved;
+            this.pressureObserved = pressureObserved;
+            this.sizeObserved = sizeObserved;
+            this.orientationObserved = orientationObserved;
+            this.touchMajorSynthesizedOrUnknown = touchMajorSynthesizedOrUnknown;
+            this.touchMinorSynthesizedOrUnknown = touchMinorSynthesizedOrUnknown;
+            this.toolMajorSynthesizedOrUnknown = toolMajorSynthesizedOrUnknown;
+            this.toolMinorSynthesizedOrUnknown = toolMinorSynthesizedOrUnknown;
+            this.pressureSynthesizedOrUnknown = pressureSynthesizedOrUnknown;
+            this.sizeSynthesizedOrUnknown = sizeSynthesizedOrUnknown;
+            this.orientationSynthesizedOrUnknown = orientationSynthesizedOrUnknown;
+            this.inputMetadata = inputMetadata;
         }
     }
 
@@ -97,6 +142,20 @@ final class AispectTouchAxisReader {
         }
 
         InputDevice device = event.getDevice();
+        boolean hasTouchMajorRange = hasAxis(device, MotionEvent.AXIS_TOUCH_MAJOR);
+        boolean hasTouchMinorRange = hasAxis(device, MotionEvent.AXIS_TOUCH_MINOR);
+        boolean hasToolMajorRange = hasAxis(device, MotionEvent.AXIS_TOOL_MAJOR);
+        boolean hasToolMinorRange = hasAxis(device, MotionEvent.AXIS_TOOL_MINOR);
+        boolean hasPressureRange = hasAxis(device, MotionEvent.AXIS_PRESSURE);
+        boolean hasSizeRange = hasAxis(device, MotionEvent.AXIS_SIZE);
+        boolean hasOrientationRange = hasAxis(device, MotionEvent.AXIS_ORIENTATION);
+        boolean touchMajorObserved = positive(touchMajor);
+        boolean touchMinorObserved = positive(touchMinor);
+        boolean toolMajorObserved = positive(toolMajor);
+        boolean toolMinorObserved = positive(toolMinor);
+        boolean pressureObserved = Float.isFinite(pressure);
+        boolean sizeObserved = Float.isFinite(size);
+        boolean orientationObserved = Float.isFinite(orientation);
         return new Sample(
                 sanitize(pressure),
                 sanitize(size),
@@ -105,13 +164,28 @@ final class AispectTouchAxisReader {
                 sanitize(toolMajor),
                 sanitize(toolMinor),
                 sanitize(orientation),
-                hasAxis(device, MotionEvent.AXIS_TOUCH_MAJOR),
-                hasAxis(device, MotionEvent.AXIS_TOUCH_MINOR),
-                hasAxis(device, MotionEvent.AXIS_TOOL_MAJOR),
-                hasAxis(device, MotionEvent.AXIS_TOOL_MINOR),
-                hasAxis(device, MotionEvent.AXIS_PRESSURE),
-                hasAxis(device, MotionEvent.AXIS_SIZE),
-                hasAxis(device, MotionEvent.AXIS_ORIENTATION)
+                hasTouchMajorRange,
+                hasTouchMinorRange,
+                hasToolMajorRange,
+                hasToolMinorRange,
+                hasPressureRange,
+                hasSizeRange,
+                hasOrientationRange,
+                touchMajorObserved,
+                touchMinorObserved,
+                toolMajorObserved,
+                toolMinorObserved,
+                pressureObserved,
+                sizeObserved,
+                orientationObserved,
+                touchMajorObserved && !hasTouchMajorRange,
+                touchMinorObserved && (!hasTouchMinorRange || (touchMinor == touchMajor && !hasTouchMinorRange)),
+                toolMajorObserved && !hasToolMajorRange,
+                toolMinorObserved && !hasToolMinorRange,
+                pressureObserved && !hasPressureRange,
+                sizeObserved && !hasSizeRange,
+                orientationObserved && !hasOrientationRange,
+                AispectTouchInputMetadata.from(event)
         );
     }
 

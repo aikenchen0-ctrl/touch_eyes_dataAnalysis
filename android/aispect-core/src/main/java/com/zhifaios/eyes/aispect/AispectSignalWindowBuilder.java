@@ -455,7 +455,9 @@ public final class AispectSignalWindowBuilder {
                 timeSinceLiftAnchor,
                 source.timestampSeconds,
                 source.sensorTimestampElapsedRealtimeNanos,
-                source.receivedElapsedRealtimeNanos
+                source.receivedElapsedRealtimeNanos,
+                source.sensorSource,
+                source.streamEpoch
         );
     }
 }

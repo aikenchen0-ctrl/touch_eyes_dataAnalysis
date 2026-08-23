@@ -106,6 +106,7 @@ public final class AispectCollectionController {
     private final AispectImpactSignalCollector signalCollector;
     private final AispectSignalWindowBuilder windowBuilder = new AispectSignalWindowBuilder();
     private final AispectDataLogger dataLogger;
+    private final AispectCollectionUploadQueue uploadQueue;
     private final AispectImpactCNNClassifier classifier;
     private final AispectDownAnchorWindowGate downWindowGate = new AispectDownAnchorWindowGate();
     private final AispectDeviceCapabilityProfiler capabilityProfiler = new AispectDeviceCapabilityProfiler();
@@ -160,12 +161,25 @@ public final class AispectCollectionController {
         }
         deviceId = storedDeviceId;
         dataLogger = new AispectDataLogger(context);
+        uploadQueue = new AispectCollectionUploadQueue(context, null);
         classifier = new AispectImpactCNNClassifier(context);
         AispectImpactCNNClassifier.ModelInfo defaultModel = classifier.defaultModelInfo();
         if (defaultModel != null) {
             selectedModelId = defaultModel.id;
             activeModelId = defaultModel.id;
         }
+        AispectModelRuntimeController.shared().bind(() -> handler.post(() -> {
+            classifier.reloadRemoteModel();
+            AispectImpactCNNClassifier.ModelInfo refreshed = classifier.defaultModelInfo();
+            if (refreshed != null) {
+                selectedModelId = refreshed.id;
+                activeModelId = refreshed.id;
+            }
+            clearLatestPredictionSnapshot();
+            lastEventKey = "collector_remote_model_activated";
+            lastEventDetail = refreshed == null ? null : refreshed.id;
+            emitStatus();
+        }));
         signalCollector = new AispectImpactSignalCollector(context);
         interactionEngine = new AispectInteractionEngine(event -> {
             activeEvents.add(event);
@@ -183,6 +197,20 @@ public final class AispectCollectionController {
         return dataLogger;
     }
 
+    public String deviceId() {
+        return deviceId;
+    }
+
+    public void configureUpload(String baseUrl, String appId, String deviceName, String appVersion) {
+        AispectCollectionUploadQueue.Config uploadConfig = new AispectCollectionUploadQueue.Config();
+        uploadConfig.baseUrl = baseUrl;
+        uploadConfig.appId = appId;
+        uploadConfig.deviceId = deviceId;
+        uploadConfig.deviceName = deviceName;
+        uploadConfig.appVersion = appVersion;
+        uploadQueue.configure(uploadConfig);
+    }
+
     public AispectInteractionEngine interactionEngine() {
         return interactionEngine;
     }
@@ -193,6 +221,10 @@ public final class AispectCollectionController {
 
     public AispectImpactCNNClassifier.ModelInfo selectedModelInfo() {
         return classifier.modelInfoForId(selectedModelId);
+    }
+
+    public boolean hasActiveRemoteModel() {
+        return classifier.hasActiveRemoteModel();
     }
 
     public String firstTouchModelId() {
@@ -315,6 +347,8 @@ public final class AispectCollectionController {
         cancelDownWindowPoll();
         downWindowGate.reset();
         activeTouch = false;
+        AispectModelRuntimeController.shared().onTouchFinished();
+        AispectModelRuntimeController.shared().unbind();
         signalCollector.stop();
     }
 
@@ -356,6 +390,7 @@ public final class AispectCollectionController {
         long receivedElapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos();
         if (action == MotionEvent.ACTION_DOWN) {
             activeTouch = true;
+            AispectModelRuntimeController.shared().onTouchStarted();
             activeSaveScheduled = false;
             activeShouldSaveSample = enabled;
             activeTouchSequence += 1;
@@ -396,6 +431,7 @@ public final class AispectCollectionController {
                     downEventTimeMillis,
                     width,
                     height,
+                    downEventElapsedRealtimeNanos,
                     receivedUptimeMillis,
                     receivedElapsedRealtimeNanos
             );
@@ -409,6 +445,7 @@ public final class AispectCollectionController {
                 downEventTimeMillis,
                 width,
                 height,
+                downEventElapsedRealtimeNanos,
                 receivedUptimeMillis,
                 receivedElapsedRealtimeNanos
         );
@@ -618,8 +655,10 @@ public final class AispectCollectionController {
             return;
         }
         activeTouch = false;
+        AispectModelRuntimeController.shared().onTouchFinished();
         cancelDownWindowPoll();
-        AispectDeviceCapabilityProfiler.Snapshot capability = capabilityProfiler.snapshot();
+        AispectDeviceCapabilityProfiler.Snapshot capability =
+                AispectDeviceCapabilityProfiler.snapshotForFrames(activeTouchFrames);
         AispectContactPatch patch = AispectContactPatch.fromFrames(new ArrayList<>(activeTouchFrames));
         latestNormalizationProfile = normalizationEngine.evaluate(new ArrayList<>(activeTouchFrames), patch);
         latestContactEncodingProfile = AispectContactEncodingProfile.evaluate(new ArrayList<>(activeTouchFrames), patch, activeContactEncodingScheme);
@@ -668,6 +707,11 @@ public final class AispectCollectionController {
                     null,
                     signalSnapshot
             );
+            try {
+                uploadQueue.enqueue(record.json);
+            } catch (IOException | RuntimeException uploadError) {
+                // Local dataset persistence remains successful when queue scheduling is unavailable.
+            }
             normalizationEngine.observe(latestNormalizationProfile);
             acceptedCount += 1;
             lastEventKey = "collector_event_saved";

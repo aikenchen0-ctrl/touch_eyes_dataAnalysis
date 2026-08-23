@@ -12,6 +12,7 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -71,6 +72,7 @@ public final class AispectImpactCNNClassifier {
     }
 
     private final Context context;
+    private final AispectRemoteModelStore remoteStore;
     private final Map<String, Model> modelCache = new HashMap<>();
     private final Map<String, Boolean> modelLoadAttempts = new HashMap<>();
     private final Map<String, AispectTimeGridGroupNormRuntime> timeGridRuntimeCache = new HashMap<>();
@@ -79,6 +81,25 @@ public final class AispectImpactCNNClassifier {
 
     public AispectImpactCNNClassifier(Context context) {
         this.context = context.getApplicationContext();
+        AispectRemoteModelStore store;
+        try {
+            store = new AispectRemoteModelStore(
+                    new File(this.context.getFilesDir(), "aispect_runtime_models")
+            );
+        } catch (AispectRemoteModelStore.StoreException error) {
+            store = null;
+        }
+        this.remoteStore = store;
+    }
+
+    public void reloadRemoteModel() {
+        synchronized (this) {
+            modelCache.clear();
+            modelLoadAttempts.clear();
+            timeGridRuntimeCache.clear();
+            timeGridRuntimeLoadAttempts.clear();
+            catalogModels = null;
+        }
     }
 
     public static boolean usesCausalPressFeatureContract(String featureContract) {
@@ -90,10 +111,28 @@ public final class AispectImpactCNNClassifier {
     }
 
     public List<ModelInfo> availableModels() {
-        return Collections.unmodifiableList(loadCatalogModels());
+        ArrayList<ModelInfo> models = new ArrayList<>();
+        ModelInfo remote = remoteModelInfo();
+        if (remote != null) {
+            models.add(remote);
+        }
+        for (ModelInfo info : loadCatalogModels()) {
+            if (remote == null || !remote.id.equals(info.id)) {
+                models.add(info);
+            }
+        }
+        return Collections.unmodifiableList(models);
+    }
+
+    public boolean hasActiveRemoteModel() {
+        return remoteModelInfo() != null;
     }
 
     public ModelInfo defaultModelInfo() {
+        ModelInfo remote = remoteModelInfo();
+        if (remote != null) {
+            return remote;
+        }
         ModelInfo onePlusBest = modelInfoForId(MODEL_FINGER_FOUR_CLASS_TOP);
         if (onePlusBest != null) {
             return onePlusBest;
@@ -120,6 +159,10 @@ public final class AispectImpactCNNClassifier {
     public ModelInfo modelInfoForId(String modelId) {
         if (modelId == null) {
             return null;
+        }
+        ModelInfo remote = remoteModelInfo();
+        if (remote != null && modelId.equals(remote.id)) {
+            return remote;
         }
         for (ModelInfo info : loadCatalogModels()) {
             if (modelId.equals(info.id)) {
@@ -360,8 +403,8 @@ public final class AispectImpactCNNClassifier {
             ModelInfo info = modelInfoForId(modelId);
             if (info != null) {
                 try {
-                    JSONObject weights = new JSONObject(readAsset(resourceAssetPath(info.weightsResourceName)));
-                    JSONObject scaler = new JSONObject(readAsset(resourceAssetPath(info.scalerResourceName)));
+                    JSONObject weights = readRemoteOrAsset(info.id, info.weightsResourceName);
+                    JSONObject scaler = readRemoteOrAsset(info.id, info.scalerResourceName);
                     AispectTimeGridGroupNormRuntime runtime = AispectTimeGridGroupNormRuntime.load(info.id, weights, scaler);
                     if (runtime != null) {
                         timeGridRuntimeCache.put(modelId, runtime);
@@ -372,6 +415,44 @@ public final class AispectImpactCNNClassifier {
             }
         }
         return timeGridRuntimeCache.get(modelId);
+    }
+
+    private JSONObject readRemoteOrAsset(String modelId, String resourceName)
+            throws IOException, JSONException {
+        if (remoteStore != null) {
+            AispectRemoteBundleValidator.ValidatedBundle remote = remoteStore.loadCurrent();
+            if (remote != null && remote.modelId.equals(modelId)) {
+                File directory = remoteStore.currentDirectory();
+                if (directory == null) {
+                    throw new IOException("remote_model_directory_missing");
+                }
+                return new JSONObject(readFile(new File(directory, resourceName)));
+            }
+        }
+        return new JSONObject(readAsset(resourceAssetPath(resourceName)));
+    }
+
+    private ModelInfo remoteModelInfo() {
+        if (remoteStore == null) {
+            return null;
+        }
+        AispectRemoteBundleValidator.ValidatedBundle bundle = remoteStore.loadCurrent();
+        if (bundle == null) {
+            return null;
+        }
+        return new ModelInfo(
+                bundle.modelId,
+                "Remote " + bundle.modelId + " " + bundle.version,
+                "weights.json",
+                "scaler.json",
+                bundle.channelCount,
+                bundle.frameCount,
+                sequentialFrameIndices(bundle.frameCount),
+                bundle.featureNames,
+                bundle.labelOrder.length,
+                bundle.labelOrder,
+                bundle.featureContract
+        );
     }
 
     private List<ModelInfo> loadCatalogModels() {
@@ -678,6 +759,10 @@ public final class AispectImpactCNNClassifier {
             return indices;
         }
         return new int[0];
+    }
+
+    private static String readFile(File file) throws IOException {
+        return new String(AispectFileIO.readBytes(file), StandardCharsets.UTF_8);
     }
 
     private static int[] sequentialFrameIndices(int count) {

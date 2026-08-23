@@ -49,6 +49,13 @@ public final class AispectTouchNormalizationEngine {
         boolean hasRadius;
         boolean hasShape;
         boolean hasPressureOrSize;
+        boolean touchAxesSemanticallyValid;
+        boolean toolAxesIndependent;
+        int touchAxisPairCount;
+        int invertedTouchAxisPairCount;
+        int distinctTouchAxisPairCount;
+        int toolAxisComparisonCount;
+        int toolAxisAliasCount;
         String source = "unavailable";
     }
 
@@ -123,26 +130,56 @@ public final class AispectTouchNormalizationEngine {
                 stats.frameCount += 1;
                 stats.screenDiagonalPx = Math.max(stats.screenDiagonalPx, diagonal(frame.width, frame.height));
                 stats.screenAreaPx = Math.max(stats.screenAreaPx, Math.max(1, frame.width) * (double) Math.max(1, frame.height));
-                double major = firstPositive(frame.touchMajor, frame.toolMajor);
-                double minor = firstPositive(frame.touchMinor, frame.toolMinor);
+                // 触摸接触轴只接受真实 touchMajor/touchMinor，工具轴仅作为独立观察字段。
+                double major = firstPositive(frame.touchMajor);
+                double minor = firstPositive(frame.touchMinor);
+                if (major > 0 && minor > 0) {
+                    stats.touchAxisPairCount += 1;
+                    if (major + 0.0001 < minor) {
+                        stats.invertedTouchAxisPairCount += 1;
+                    }
+                    if (Math.abs(major - minor) > 0.0001) {
+                        stats.distinctTouchAxisPairCount += 1;
+                    }
+                }
+                double toolMajor = firstPositive(frame.toolMajor);
+                double toolMinor = firstPositive(frame.toolMinor);
+                if (major > 0 && minor > 0 && toolMajor > 0 && toolMinor > 0) {
+                    stats.toolAxisComparisonCount += 1;
+                    if (Math.abs(major - toolMajor) <= 0.0001
+                            && Math.abs(minor - toolMinor) <= 0.0001) {
+                        stats.toolAxisAliasCount += 1;
+                    }
+                }
                 if (major > 0) {
                     stats.majorMaxPx = Math.max(stats.majorMaxPx, major);
-                    stats.source = frame.touchMajor > 0 ? "touch_major" : "tool_major";
+                    stats.source = "touch_major";
                     stats.hasRadius = true;
                 }
                 if (minor > 0) {
                     stats.minorMaxPx = Math.max(stats.minorMaxPx, minor);
-                    stats.hasShape = true;
                 }
                 if (Math.abs(frame.orientation) > 0.0001f) {
                     stats.orientationRad = frame.orientation;
                     stats.hasShape = true;
                 }
-                if (frame.pressure > 0f || frame.size > 0f) {
+                boolean pressureReliable = frame.pressureObserved
+                        && frame.hasPressureRange
+                        && !frame.pressureSynthesizedOrUnknown;
+                boolean sizeReliable = frame.sizeObserved
+                        && frame.hasSizeRange
+                        && !frame.sizeSynthesizedOrUnknown;
+                if (pressureReliable || sizeReliable) {
                     stats.hasPressureOrSize = true;
                 }
             }
         }
+        stats.touchAxesSemanticallyValid = stats.touchAxisPairCount > 0
+                && stats.invertedTouchAxisPairCount == 0;
+        stats.toolAxesIndependent = stats.toolAxisComparisonCount > 0
+                && stats.toolAxisAliasCount < stats.toolAxisComparisonCount;
+        stats.hasShape = stats.hasShape || (stats.touchAxesSemanticallyValid
+                && stats.distinctTouchAxisPairCount > 0);
         if (stats.majorMaxPx <= 0 && patch != null && patch.rawMajorPx > 0) {
             // 若原始帧缺少半径字段，使用已构建的接触区域兜底，但仍保留来源标记供训练判断。
             stats.majorMaxPx = patch.rawMajorPx;
@@ -272,6 +309,8 @@ public final class AispectTouchNormalizationEngine {
                 stats.hasRadius,
                 stats.hasShape,
                 stats.hasPressureOrSize,
+                stats.touchAxesSemanticallyValid,
+                stats.toolAxesIndependent,
                 stats.frameCount,
                 stats.source
         );
@@ -285,14 +324,8 @@ public final class AispectTouchNormalizationEngine {
         return Math.sqrt(width * (double) width + height * (double) height);
     }
 
-    private static double firstPositive(float first, float second) {
-        if (Float.isFinite(first) && first > 0f) {
-            return first;
-        }
-        if (Float.isFinite(second) && second > 0f) {
-            return second;
-        }
-        return 0;
+    private static double firstPositive(float value) {
+        return Float.isFinite(value) && value > 0f ? value : 0;
     }
 
     private static double normalizeOrientation(double value) {
@@ -360,6 +393,12 @@ public final class AispectTouchNormalizationEngine {
             quality += 0.1;
         }
         quality += Math.min(0.1, stats.frameCount / 40.0);
+        if (!stats.touchAxesSemanticallyValid) {
+            quality = Math.min(quality, 0.65);
+        }
+        if (!stats.hasShape) {
+            quality = Math.min(quality, 0.7);
+        }
         return clamp01(quality);
     }
 

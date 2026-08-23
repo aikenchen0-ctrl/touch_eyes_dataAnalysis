@@ -77,26 +77,28 @@
 - 新标准原始 IMU 帧不写入 `delta` 或 `maxAbsDelta`，只保留真实加速度、陀螺仪、重力、触摸归一化坐标和时间对齐字段。旧模型资源和历史数据保留，但在新标准采集路径中不作为分类结果；新模型需在 schema v6 数据重新采集后训练。
 
 ## Android schema v6 时间对齐补充
-- `AispectCaptureClock`：使用一次触摸回调中的 `SystemClock.uptimeMillis()` 与 `SystemClock.elapsedRealtimeNanos()` 观测对，将 `MotionEvent.getEventTime()` 的 uptime 毫秒换算到 `elapsedRealtimeNanos`。该换算只用于建立跨源共同时间轴；原始 `eventTimeMillis` 仍完整保存。
+- `AispectCaptureClock`：`ACTION_DOWN` 时固定一次 `SystemClock.uptimeMillis()` 与 `SystemClock.elapsedRealtimeNanos()` 的时钟原点，之后所有 `MotionEvent.getEventTime()` 均使用该固定偏移换算到 `elapsedRealtimeNanos`。这样同一毫秒内的历史点不会因不同回调的亚毫秒接收偏移发生倒序；原始 `eventTimeMillis` 仍完整保存。
 - `AispectModels.ImpactFrame`：每个 IMU 帧新增 `sensorTimestampElapsedRealtimeNanos`（硬件 `SensorEvent.timestamp`）和 `receivedElapsedRealtimeNanos`（应用收到该回调的单调时钟）。窗口复制与锚点重算会保留这两个字段，补位帧统一为 `0`，不伪造原始时间戳。
-- `AispectTouchFrame`：每个 `touchFrames[]` 元素新增 `eventElapsedRealtimeNanos` 与 `receivedElapsedRealtimeNanos`。历史触摸点共用其所在 `MotionEvent` 回调的接收时刻，但各自按自己的 `eventTimeMillis` 还原事件时刻。
+- `AispectTouchFrame`：每个 `touchFrames[]` 元素新增 `eventElapsedRealtimeNanos` 与 `receivedElapsedRealtimeNanos`。事件时间使用按下锚点固定偏移还原；同一 `eventTimeMillis` 的点允许相同纳秒时间，并按 `frameIndex` 保持稳定顺序。`timeAlignment.schemaVersion=2` 且 `touchTimestampConversion=touch_event_time_millis_from_down_anchor_v2`。
+- 旧 schema v6 的 `timeAlignment.schemaVersion=1` 数据可在清洗端按 `downEventElapsedRealtimeNanos + (eventTimeMillis-downEventTimeMillis)*1e6` 重建触摸事件时间；不需要丢弃原始样本。
+- `AispectTouchInputMetadata`：触摸输入源名称不调用设备上不存在的隐藏/非稳定 SDK API，保留 `source` 原始整数并以 `0x%08x` 形式写出 `sourceName`，保证 compileSdk 34 及运行端兼容。
 - `AispectCollectionController`：`ACTION_DOWN` 保存按下事件/接收单调时间；按下和抬起锚点、IMU 窗口选择均使用同一 `elapsedRealtime` 时间轴。采集窗口的旧相对时间字段继续写出，供历史工具兼容读取。
 - `AispectDataLogger`：新记录使用 `schemaVersion: 6`，新增 `timeAlignment` 对象，保存按下/抬起的事件与接收时间、时钟来源和双时间门。训练阶段必须同时满足 `touchReceivedElapsedRealtimeNanos <= imuReceivedElapsedRealtimeNanos` 与 `touchEventElapsedRealtimeNanos <= imuSensorTimestampElapsedRealtimeNanos`，再选择最新触摸帧执行零阶保持（ZOH），不得按名义采样率配对。
 - `android/analysis/causal_press_features.py` / `AispectCausalPressFeatureBuilder`：schema v6 按下期活动合同为 `causal_imu12_v1`（9 个 IMU + 归一化坐标 + `touch_valid`）和 `causal_imu11_touch9_v1`（20 通道）。二者只读取 IMU 与逐帧 `touchFrames[]`，不读取根级 Contact Patch、整次归一化画像、抬起相对时间或其他结束后汇总。20 通道版本追加 pressure、size、按当前视图对角线归一化的 major/minor、对数轴比、方向 sin/cos、指针数和触摸有效位。缺少 IMU 硬件/接收时间、触摸事件/接收时间或已对齐触摸帧的视图尺寸时，因果输入拒绝构建。
 - `AispectTouchFrame`：schema v6 的 `touchFrames[]` 每帧新增 `viewWidthPx` 与 `viewHeightPx`，使训练端可以使用产生该触摸帧时的真实视图对角线归一化接触轴，而不使用整次触摸最大值或结束后聚合值。
 - `train_android_finger_four_class_cnn.py` / `AispectImpactCNNClassifier`：新的 down-anchor CLI 默认并强制使用 causal preset，拒绝 legacy preset、手工特征名单和矩阵后处理变换；训练 scaler 与报告写入 `featureContract`。训练分割出口强制检查 train/valid 的原始 session 不交集且不得缺失 session ID。Android 仅在 scaler 的合同为 causal v1 时把已就绪按下窗口和 `activeTouchFrames` 传入因果构建器，然后使用导出的 center/scale 标准化；旧模型保持显式 legacy 兼容路径，不会被解释为新因果模型。
 - `android/analysis/training_common.py` / `android/analysis/legacy/README.zh-CN.md`：新训练器的通用 PyTorch、张量、解析和 JSON 工具已与旧 schema v5 训练脚本解耦；旧 `train_android_touch_cnn.py` 及其汇总特征路径只允许历史复现，禁止处理 schema v6 因果训练。
-- `AispectLegacyFeatureBuilder`：旧 Contact Patch、`touchNormalization`、高斯图、多通道、协方差和 `time_since_anchor` 读取已集中到 `aispect/legacy` 包，仅供非 causal 合同历史模型复现。主分类器先判断 `causal_*` 合同，causal 分支不会调用该类，也不会读取根级聚合字段；新增因果模型禁止复用 legacy 入口。
+- `AispectLegacyFeatureBuilder`：旧 Contact Patch、`touchNormalization`、高斯图、多通道、协方差和 `time_since_anchor` 读取已集中到 `aispect/legacy` 包，仅供非 causal 合同历史模型复现。主分类器先判断 `causal_*` 合同，causal 分支不会调用该类，也不会读取根级聚合字段；新增因果模型禁止复用 legacy 入口。输入守卫分别校验时间槽数和通道数，不再错误要求两者相等，允许合法的 `时间槽数 x 特征通道数` 矩阵。
 
 ## Android 移植与采集补充
 - `android/`：新增独立 Android 多模块工程，包含可复用库模块 `aispect-core` 与采集示例 App；当前迁移范围排除声学与闭眼相机链路，优先落地触摸采集、IMU 窗口、设备能力画像、CNN 诊断与 JSON 落盘。
 - `AispectCollectionController`：Android 采集主入口，宿主 View 只需把 `MotionEvent` 与控件宽高传入 `handleMotionEvent`，即可完成单次触摸的原始触摸帧、事件流、按下期窗口就绪状态、按下/抬起双锚点 IMU 原始窗口、设备能力与训练样本保存；旧 CNN 诊断路径默认关闭。
-- `AispectTouchFrame` / `AispectTouchAxisReader`：采集 Android 系统公开触摸底层字段，优先使用 `MotionEvent` 标准 axis，兼容读取 `AXIS_TOUCH_MAJOR`、`AXIS_TOUCH_MINOR`、`AXIS_TOOL_MAJOR`、`AXIS_TOOL_MINOR`、`AXIS_PRESSURE`、`AXIS_SIZE`、`AXIS_ORIENTATION`，并回退到 `getTouchMajor/getTouchMinor/getToolMajor/getToolMinor/getPressure/getSize/getOrientation` 便捷接口。
-- `AispectDeviceCapabilityProfiler`：基于 `InputDevice.MotionRange` 与实际采样值生成 Level A/B/C 能力画像；Level A 表示具备 major 且有 minor/pressure/size/orientation 等增强字段，Level B 表示只有 major 或近似半径，Level C 表示无可靠触摸半径并回退到通用 IMU/坐标/时间通道。
-- `AispectContactPatch`：把 Android 触摸椭圆归一化为跨设备接触 patch；当 major/minor 可用时使用椭圆协方差，当只有 major 或 toolMajor 时转为近似圆形半径，当所有半径字段不可用时使用默认小 patch 并记录 `defaultApplied`，避免训练 schema 断裂。
+- `AispectTouchFrame` / `AispectTouchAxisReader`：采集 Android 系统公开触摸底层字段，保留每帧 `pointerId/actionMasked/actionIndex`、事件/接收双时钟，以及每个轴的 `declared/observed/synthesizedOrUnknown` 和来源字符串；便捷 getter 只能作为同一 MotionEvent 的读取路径，不能改变轴语义。
+- `AispectDeviceCapabilityProfiler`：基于 `InputDevice.MotionRange` 与实际采样值生成 Level A/B/C 能力画像；范围声明、值存在和信息性分开记录，恒定压力等 Framework 默认值不能仅凭存在或声明范围升级能力。画像新增 `touchAxesSemanticallyValid`、`touchAxesDistinct` 与 `toolAxesIndependent`：出现 `touchMajor < touchMinor` 时触摸轴语义无效，major/minor 全程相等时只证明半径而不证明独立形状，`toolMajor/toolMinor` 与触摸轴全程同值时只能视为别名而非独立证据。Level A 要求可靠 major 且 minor、pressure 或 orientation 至少一个独立增强字段真实有变化；仅有可靠半径或只有同源归一化 `size` 时为 Level B，其他情况为 Level C。单条 JSON 的画像通过 `snapshotForFrames(activeTouchFrames)` 仅从本次触摸重建，避免 observed、variable、informative 和轴别名状态继承上一条触摸；累计画像仅可用于界面诊断。所有原始字段仍原样保存供离线重判。
+- `AispectContactPatch`：把 Android 触摸椭圆归一化为跨设备接触 patch；只使用 `touchMajor/touchMinor`，当只有触摸长轴时使用明确命名的 `touch_major_only_synthesized_minor`，绝不把 `toolMajor/toolMinor` 静默覆盖为触摸轴；所有半径字段不可用时使用默认小 patch 并记录 `defaultApplied`。
 - `AispectContactEncodingProfile`：新增真正面向 CNN 输入设计的 Contact Patch 三方案编码，包含 `gaussian_map`、`multi_channel`、`covariance_matrix`。其中二维高斯方案输出固定 `9x9` 接触热图，缺失半径时使用默认 `sigma = 12px` 且 `validMask = 0`；多通道方案输出中心、major、minor、orientation 与 valid mask；协方差方案输出 `x/y/cov_11/cov_12/cov_22/validMask`。每条新 Android 样本会同时写入三套编码，面板按钮只标记本轮主方案，便于后续离线横向比对。
-- `AispectTouchNormalizationEngine` / `AispectTouchNormalizationProfile`：Android 触摸归一化新增三套可切换方案，分别为屏幕比例归一化、接触椭圆协方差矩阵归一化、本轮历史基线相对归一化；采集面板允许在采集关闭时切换当前方案，训练样本 JSON 会同时写入 `screenScale`、`covarianceMatrix`、`sessionBaseline`、设备内分位诊断、短期历史偏移诊断、字段质量标记与 `contactPatch`，便于后续离线对比哪套方案更优。
-- `AispectImpactSignalCollector` / `AispectSignalWindowBuilder`：使用 `Sensor.TYPE_LINEAR_ACCELERATION` 优先、`TYPE_ACCELEROMETER` 兜底，并同步采集 gyroscope 与 gravity；Android 目标采样周期调整为 4167us，尽量贴近 iOS 240Hz 采样；`ACTION_DOWN` 后按 down timestamp 等待完整真实 `-5...+9` 窗口，抬起后另行构造 `down-15...lift+15` 原始窗口，不计算 delta。
+- `AispectTouchNormalizationEngine` / `AispectTouchNormalizationProfile`：Android 触摸归一化新增三套可切换方案，分别为屏幕比例归一化、接触椭圆协方差矩阵归一化、本轮历史基线相对归一化；接触长短轴只读取逐帧 `touchMajor/touchMinor`，`toolMajor/toolMinor` 仅保留为原始观察字段，不能进入接触归一化。诊断同步输出 `touchAxesSemanticallyValid/toolAxesIndependent`；轴语义倒置或 major/minor 不可区分时不能声明 `hasShape=true`，字段质量最高降为 `medium`，防止设备默认值、单半径或轴别名被误评为 high。采集面板允许在采集关闭时切换当前方案，训练样本 JSON 会同时写入 `screenScale`、`covarianceMatrix`、`sessionBaseline`、设备内分位诊断、短期历史偏移诊断、字段质量标记与 `contactPatch`，便于后续离线对比哪套方案更优。
+- `AispectImpactSignalCollector` / `AispectSignalWindowBuilder`：使用 `Sensor.TYPE_LINEAR_ACCELERATION` 优先、同一时间轴的普通加速度减重力次之；每次注册都检查 `SensorManager.registerListener()` 的布尔结果，线性加速度或姿态候选注册失败、首帧超时或停流时才切换下一候选并递增 `streamEpoch`。重力只有在注册成功、已有首帧且未停流时才允许声明 `accelerometer_minus_gravity`；普通加速度完成减重力后，记录级与逐帧均使用该派生来源名，不再把输出误标成带重力原始值。重力停流或恢复造成 `accelerometer_minus_gravity` 与 `accelerometer_raw_no_gravity` 切换时也必须建立新 `streamEpoch`。无有效重力时普通加速度仍可作为原始证据保存，但逐帧与记录级均固定 `trainingInput=false`；只有 `linear_acceleration` 与 `accelerometer_minus_gravity` 可标记为训练候选。窗口重建只改锚点相对时间，必须逐帧透传原始 `sensorSource/streamEpoch/trainingInput` 和双时钟。陀螺仪、重力和姿态候选分别记录 `UNAVAILABLE/WAITING_FIRST_EVENT/HEALTHY/DEGRADED/STALLED` 健康状态和时间戳倒退计数；姿态优先采集 `GAME_ROTATION_VECTOR`，再独立回退到其他姿态流，写入 `sensorMetadata.rotationFrames[]` 且固定 `trainingInput=false`。姿态来源允许随回退跨 epoch 改变，但同一 epoch 内禁止混源，最后一个健康姿态帧来源必须与当前活动来源一致。Android 目标采样周期调整为 4167us；`ACTION_DOWN` 后的端侧模型窗口与原始采集窗口分离，原始窗口开始于按下前同时满足至少 `85ms` 和 `15` 个真实 IMU 帧的位置，结束于抬起后同时满足至少 `85ms` 和 `15` 帧的位置，不计算 delta。
 - `AispectImpactSignalCollector` / `AndroidManifest.xml`：补充 Android 12+ 高频传感器权限 `HIGH_SAMPLING_RATE_SENSORS`，并在注册 4167us 采样失败时按 10000us、16667us、`SENSOR_DELAY_GAME`、`SENSOR_DELAY_UI` 逐级降级，避免小米 Android 15 因高频 IMU 注册抛出 `SecurityException` 导致点击采集开关闪退。
 - `AispectImpactCNNClassifier`：Android 侧内置纯 Java 1D CNN 推理器，支持当前 iOS 4 通道模型与旧触控包内多组 `g11/g13_time` 模型；新增 `ModelInfo`、`availableModels()`、`modelInfoForId()` 与 catalog 加载缓存，宿主可以显示真实模型列表并指定模型执行诊断推理。历史 Contact Patch 与归一化字段统一由 `AispectLegacyFeatureBuilder` 提供，不能从 causal 分支进入。
 - `AispectLegacyFeatureBuilder`：补齐旧 Contact Patch 三方案 CNN 输入的手机端同名特征，支持 `gaussian.map.00...80`、`gaussian.center/sum/energy/spread/sigma_x_px/sigma_y_px/valid_mask`、`multi.center_x_norm/center_y_norm/major_px/minor_px/orientation_rad/valid_mask`、`covariance.x_norm/y_norm/cov_11/cov_12/cov_22/valid_mask`。缺失 IMU 帧与历史训练脚本保持一致按零帧补齐；该路径仅用于旧模型复现。
@@ -122,7 +124,8 @@
 - `MainActivity`：面板常驻区域隐藏冲击窗口日志、复制日志按钮和接触编码明细数据，避免长窗口文本挤占四分类验证数据显示空间。
 - `AispectCollectionController` / `MainActivity`：训练采集改为无触觉反馈、无红色冲击闪屏、无 CNN 预测落盘；`cnnPrediction` 只用于屏幕验证显示，不写入训练 JSON，确保导出的训练数据只包含人工标签、原始触摸帧、IMU 窗口、设备能力、Contact Patch 与接触编码等原生字段。面板新增“最近原生样本”摘要，显示刚保存样本的人工标签、触摸帧数、窗口帧数、采样率、`maxDelta`、major/minor/pressure 和文件名。
 - `zhifaIOS_old.app` 适配：Android assets 已接入 `/Users/xueyin/Desktop/zhifaIOS_old.app` 内的旧触控 CNN 模型 catalog 与多组 `g11/g13_time` 权重；示例 App 默认选中旧包中的 `g13_time_f14_pre4_post9` 增强模型，并允许手动切换 catalog 内 8 个模型。旧包中的 iOS Mach-O 可执行文件不能直接移植到 Android，683MB 的训练数据导出文件也不打入 APK。
-- `AispectDataLogger`：默认把 Android 训练样本写入 App 外部私有 Documents 下的 `AispectAndroidDataset`，样本 JSON 包含 `touchFrames` 原始触摸字段、`deviceCapability`、`contactPatch`、`contactEncoding`、对齐后的 `frames` 与 `motionSignal`；训练采集路径不写入 `cnnPrediction`，避免模型输出反向污染训练集。
+- `AispectDataLogger`：默认把 Android 训练样本写入 App 外部私有 Documents 下的 `AispectAndroidDataset`，样本 JSON 包含 `touchFrames` 原始触摸字段、`deviceCapability`、`contactPatch`、`contactEncoding`、对齐后的 `frames` 与 `motionSignal`；训练采集路径不写入 `cnnPrediction`，避免模型输出反向污染训练集。`sensorMetadata.rotationFrames[]` 只保存最终 IMU 原始窗口首尾硬件时间戳之间的姿态观察帧，`motionSignal.rotationFrameCount` 与实际落盘数量一致，不再复制最长约 6 秒的整段滚动缓存。
+- `AispectTouchInputMetadata` / `AispectDataLogger`：记录 `InputDevice.MotionRange` 的轴、来源、范围、flat、fuzz、resolution，以及 API、品牌/型号、构建指纹、显示尺寸/模式、density/xdpi/ydpi、View 尺寸和变换版本。`touchMetadata.metadataEpoch` 表示首个触摸帧所属版本，每个 `touchFrames[]` 元素也写入正整数 `metadataEpoch`；记录级显示快照、逐帧 View 尺寸或逐帧输入设备元数据相对前一帧变化时递增，指纹不变时保持不变，跨样本也不回退。当前没有逐事件保存 `displayRotation/windowInsets`，因此只能定位已有逐帧证据中的 View/输入设备切换，不能伪称可还原触摸内部的旋转或 Insets 历史。`windowInsets` 在无 Activity/View 注入时明确标为不可用，不用零值伪装已测量 Insets；`physical_mm` 尚未生成，当前元数据只作为原始证据和后续标定输入，不能被解释为统一物理单位。
 - `AispectDataLogger` / `AispectCollectionController`：Android 采集落盘口径改为“采集阶段不判断有效/无效”，所有面板外触摸结束路径都会按当前人工选择的运动状态、轻重点与手指类型保存为 `recordStatus = accepted` 的训练样本；拖动、取消、偏移等行为不再由手机端丢弃或标成 rejected。控制器同时增加单次触摸保存闸门，同一轮 `ACTION_DOWN` 后即使系统连续派发多个结束类事件，也只会安排一次落盘，避免一次按压生成多条样本。
 - `MainActivity`：Android 示例 App 改为复刻旧 iOS 的全屏主界面 + 左上悬浮 `AispectImpactTestView` 面板结构；面板展开宽度对齐 iOS 的 204pt 结构，收起态为 132x64 可点击小面板，采集控件从大按钮改为 switch，冲击阈值区域补齐 slider 与格式化阈值文本。面板负责“冲击测试”“CNN 模型切换”“训练数据采集”、上一项/下一项模型切换、采集开关、三档运动场景、轻点/重点、引导文案、状态日志、CNN 推理结果与数据目录复制。训练采集开启后，`dispatchTouchEvent` 以 ACTION_DOWN 是否在面板外为准锁定本轮全屏采集，MOVE/UP/CANCEL 即使经过面板上方也继续送入采集链路，不再限制在底部采集框；收起/展开切换在 `dispatchTouchEvent` 最前面使用独立热区优先响应，收起态按整块小面板命中，展开态按面板顶部 58dp 命中，热区额外外扩 36dp，避免被全屏采集或按钮自身命中区影响。
 - `MainActivity` / `DemoHomeView`：触摸反馈收敛为中性触摸环，只按原始触摸半径/面积改变大小，不触发振动、红色重触提示或全屏冲击闪烁，避免采集时把 App 反馈混进用户动作和 IMU 数据。
@@ -241,9 +244,15 @@
 - 消息列表与侧栏建议加入虚拟化计算与滚动监听，满足大规模会话与消息量的性能目标。
 - 模块化接口已预留 Live Activity、PiP、Todo、知识库等能力的最小入口，可按模块逐步填充。
 
+## Android 正式构建合同
+- Android 构建在项目的 `android` 目录中执行，由 Windows Java 直接加载 `gradle\wrapper\gradle-wrapper.jar`，不依赖 Bash 或 WSL。
+- 标准调试 APK 固定执行 `java -classpath gradle\wrapper\gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain :app:assembleStandardDebug --no-daemon --max-workers=1`。
+- 仓库内只有 Unix 版 `android/gradlew`，且为 CRLF 换行；Bash/WSL 可能把路径附带 `\r`，同时当前 WSL 未配置 Java。因此 `android/gradlew` 不是正式构建入口，其失败也不能直接归因于 Android 源码。
+
 ---
 
 修改日志：
+- 2026-08-11：固定 Android 正式构建合同为 Windows Java 直接启动 Gradle Wrapper，并强制 `--no-daemon --max-workers=1`；明确禁止把 Bash/WSL 与 Unix `android/gradlew` 作为正式构建路径。
 - 2026-08-09：将 Android 旧 Contact Patch/归一化/时间特征读取集中到 `aispect/legacy/AispectLegacyFeatureBuilder`，主分类器只按 feature contract 分派；causal 合同继续仅使用双时间门 ZOH 与逐帧 touchFrames。
 - 2026-08-04：Android 控制器创建时、iOS 页面可见时预热 IMU 滚动缓存，确保验证模式在 `ACTION_DOWN` 前已有 `-5` 帧；页面销毁或离开时停止传感器。
 - 2026-08-04：修正 iOS 传感器不可用或停止时仍能结束当前原始采集会话，保留 `windowComplete` 真实状态而不丢失会话收尾。
@@ -442,6 +451,7 @@
 - `build_time_grid_training_dataset.py`：新增第三层训练清洗构建器。它按 source SHA-256 逐条核对 `[9,11]` 与 `[9,20]` 第二层矩阵及来源 manifest，生成可训练的 `causal_time_grid_imu11_v2` 和 `causal_time_grid_imu11_touch9_mask6_v3` `[9,26]` 视图。后者仅追加压力、面积、长轴、短轴、方向、指针数的逐帧可用性掩码；训练候选按 `platform + collectorDeviceId + sessionId` 严格分组，已知多指触控进入排除清单，完全相同的同组同类输入才降权。清洗报告显式标记 session-标签绑定和全量缺失的触摸字段，训练脚本可据此禁用无信息通道。
 - `train_time_grid_strict_cnn.py` / `run_time_grid_strict_baselines.py`：新增第四层严格训练入口。训练器从冻结 JSONL 和三折 session manifest 读取数据，`touch23` 固定删除全量缺失的方向三通道，scaler 只在训练折拟合并对缺失触摸值保持零；轻量一维 CNN 使用 AdamW、梯度裁剪、早停和有界 session/class 权重。调度器固定运行 `imu11` 与 `touch23` 各三折，输出逐类召回、最差折、泛化差距、参数量和确定性复训报告，未通过候选门槛时不部署模型。
 - `train_pose_invariant_variants.py`：新增全量姿态不变双模型训练入口，复用冻结的 `training_touch26.jsonl`、GroupNorm CNN、鲁棒 scaler、session/class 权重和 80 轮无早停配置。`no_gravity` 生成 `[9,20]` 输入并完全删除 `gravity.x/y/z`；`delta_gravity` 生成 `[9,23]` 输入，以每个时间槽的重力减去前一时间槽重力，第一槽固定为零，只保留旋转变化。两组产物均标记为 `all_data_fit_only`、`deploymentAllowed=false`，不覆盖现有模型或 Android 默认配置。
+- `time_grid_v6_all_no_gravity_20260811_experimental` / `time_grid_v6_all_delta_gravity_20260811_experimental`：使用 29,736 条历史与最新 schema v6 原始记录重建固定物理时间网格；29,521 条通过归一化，清洗后 29,513 条进入 80 轮全量拟合。两模型分别使用 `[9,20]` 无重力合同和 `[9,23]` 重力差分合同，继续标记为 `all_data_fit_only`、`deploymentAllowed=false`，只加入可选模型目录，不替换默认模型。
 - `cross_device_causal_features.py`：新增 `causal_time_grid_imu11_v2` 与 `causal_time_grid_imu11_touch9_v2` 契约。以 `timeAlignment.downEventElapsedRealtimeNanos` 为 `0ms`，固定重采样到 `-15,-10,-5,0,5,10,15,20,25ms` 九个物理时间槽；IMU 连续通道按硬件时间左右帧线性插值，端点缺少右支撑、间隔超过 `max(2*5ms,4*median_dt)`、时间戳异常或抬起早于 `+25ms` 时拒绝样本。
 - `cross_device_causal_features.py`：跨平台输入必须声明平台、传感器来源、单位、轴坐标系与 `transformVersion`。Android 含重力加速度计只有在 `gravityAvailable=true` 且离线执行加速度减重力后才允许进入 v2；iOS `user_acceleration`、Android 线性加速度统一为 `m/s^2`，陀螺仪统一为 `rad/s`，轴变换矩阵必须是正交单位矩阵（允许镜像）。
 - `cross_device_causal_features.py`：触摸输入只读取逐帧 `touchFrames[]`。按触摸帧接收时间相对 IMU 接收时间做零阶保持，并额外检查触摸事件时间不能晚于目标硬件时间；触摸屏幕尺寸按像素/point/毫米单位归一化，缺失压力、面积、半径或方向时写入数值占位并在 `missingMasks` 中保留独立可用性标记，根级 Contact Patch、整次汇总和抬起后字段不进入 v2 特征。
@@ -449,6 +459,7 @@
 - `AispectCausalPressFeatureBuilder` / `AispectCollectionController`：Android 端按 scaler 的 `featureContract` 显式分派 v1/v2；v2 只有在真实 IMU 数据覆盖正端点并具备右插值支撑时才发布预测，缺少触摸双时钟或窗口质量不合格时不补零、不外推。
 - `AispectCausalPressFeatureBuilder`：Android 时间网格增加两个姿态不变推理合同。`causal_time_grid_touch7_mask5_no_gravity_v1` 从原 23 通道因果矩阵中删除索引 `8..10` 的绝对重力，输出 `[9,20]`；`causal_time_grid_imu11_touch7_mask5_delta_gravity_v1` 保持 `[9,23]`，将三个重力通道替换为当前网格减前一网格的因果差分，第一网格固定为零。两者复用原触摸逐帧值、可用性掩码和 GroupNorm CNN 运行时。
 - `AispectTimeGridGroupNormRuntime`：触摸测量值的缺失掩码通过 `featureNames` 动态查找对应的 `pressure_available`、`size_available`、`major_available`、`minor_available` 或 `pointer_count_available`，不依赖 23 通道合同中的固定列号。20 通道无重力合同删除三个绝对重力列后仍能使用同一归一化运行时；声明需要触摸可用性但缺少对应掩码通道的模型会在加载时被拒绝。
+- `android/analysis/audit_cross_device_capture_contract.py`：schema v6 原始合同审计强制每个 IMU 帧携带合法 `sensorSource/streamEpoch`，检查姿态观察帧不得超出最终 IMU 窗口，并把触摸轴倒置、长短轴不可区分、工具轴完全别名和恒定压力聚合为不重复的设备退化告警。`deviceCapability` 必须包含轴语义、可区分性与独立性字段，且 `observedFrames` 必须严格等于本条 `touchFrames[]` 数量；累计画像、当前样本退化证据不一致或帧数越界都会阻止样本直接进入后续训练层，普通退化告警仍不删除原始数据。
 - 2026-08-09：开始落地跨设备 v2 因果特征契约，补齐元数据拒绝、触摸双时钟校验、固定物理时间网格支持闸门、含重力加速度计线性化和训练缓存契约签名；旧 v1 模型与原始 schema 保持兼容且不自动替换。
 - 2026-08-09：补充跨设备目标与数据结构总文档 `goal文档.md`；统一 Python/Android 的间隔中位数规则、缺失指针/触摸形状掩码、原始坐标回退归一化和按下期抬起端点过滤。
 - 2026-08-09：Android 加速度计回退路径新增同一单调时间轴的重力对齐门，未获得有效重力支撑时不写入伪线性加速度帧。
@@ -468,3 +479,72 @@
 - 2026-08-10：修复按下期时间网格模型的运行链路：模型推理改为直接读取完整 IMU 滚动缓存，经固定物理时间网格重采样后输入，旧模型继续使用历史 `-5...+9` 帧窗口；验证模式在抬起后保留最近一次按下期预测，并持续预热 IMU，直到下一次 `ACTION_DOWN` 才清空结果，避免有效预测被收尾流程覆盖。
 - 2026-08-10：修复 20 通道 `no_gravity` 实验模型真机推理时因触摸可用性掩码仍使用 23 通道固定索引而越界崩溃的问题；GroupNorm 运行时改为按特征名动态解析掩码列，并增加完整 `predict()` 回归测试。模型权重与 scaler 数值参数不变，无需重新训练。
 - 2026-08-10：Android 原始双锚点窗口升级为 `85ms + 15帧` 双下限；抬起后改为 85ms 首次检查、8ms 条件轮询和 500ms 超时，schema v6 新增版本化 `captureWindow` 审计对象。按下期九槽模型输入保持不变，iOS 同构改造仍待完成。
+- 2026-08-11：修复 Android 触摸时间轴的亚毫秒倒序；触摸事件时间改为按 `ACTION_DOWN` 固定时钟原点转换，时间对齐合同升级为 `timeAlignment.schemaVersion=2`，增加固定转换与旧数据重建说明；不改变模型输入和训练参数。
+- 2026-08-11：修复触摸输入元数据对 `InputDevice.getSourceName` 非公开 API 的依赖，改为无损十六进制 source 名称，恢复 compileSdk 34 的干净构建。
+- 2026-08-11：依据《跨设备采集字段采集方式回退研究》升级 Android 原始采集证据层：新增 MotionRange 与设备/显示元数据、逐轴来源和合成未知掩码、IMU/姿态流健康状态及 `rotationFrames[]` 观察流；姿态流固定不进入模型，触摸编码禁止 `toolMajor/toolMinor` 静默覆盖触摸轴，并新增跨设备采集合同审计脚本与测试。
+- 2026-08-11：根据规格复核补齐 Android 传感器注册返回值、首帧超时和停流后的候选切换；统一 `accelerometer_minus_gravity` 离线来源合同，禁止无重力普通加速度进入训练，并彻底移除触摸归一化与清洗脚本中的工具轴覆盖。采集审计新增 MotionRange 子字段、逐轴三态、双时钟因果、姿态来源一致性和原始加速度泄露拒绝测试。
+- 2026-08-11：为 IMU 帧和姿态观察帧补充 `sensorSource/streamEpoch`，按来源切换隔离旧帧；触摸元数据补充 `metadataEpoch/windowInsets`（不可用时显式标记），审计新增 IMU 双时钟单调性、状态/来源一致性和时间戳回退拒绝门。
+- 2026-08-11：修复双锚点窗口重建丢失逐帧 `sensorSource/streamEpoch`、`rotationFrames[]` 保存整段滚动缓存和触摸轴退化被评为 Level A/high 的问题；姿态帧改按最终 `85ms + 15帧` 双下限 IMU 窗口裁剪，能力画像与归一化诊断增加轴语义、长短轴可区分性与工具轴独立性门，major/minor 全程相等时按单半径 Level B/medium 处理，并升级 Python 合同回放。同步修复旧特征构建器错误要求时间槽数等于通道数的输入守卫。
+- 2026-08-11：继续依据《跨设备采集字段采集方式回退研究》修复传感器来源合同：普通加速度减重力后的逐帧来源统一为 `accelerometer_minus_gravity`；每个 IMU 帧新增来源派生的 `trainingInput`，原始或不可用加速度只能作为证据保存；重力健康变化导致语义切换时递增 `streamEpoch`。姿态审计改为允许不同来源跨 epoch 保留、禁止同一 epoch 混源，并要求最终健康来源与最后姿态帧一致。
+- 2026-08-11：修复 `deviceCapability` 跨触摸累计污染；单条样本保存时改为仅根据本次 `activeTouchFrames` 重建能力快照，保证长短轴可区分性、信息性和工具轴别名状态不会继承上一条触摸。累计 profiler 仅保留为运行界面诊断，不再写入单条训练 JSON；Python 合同审计同步要求 `observedFrames == touchFrames.length`，防止语义布尔值碰巧一致时漏检累计污染。
+- 2026-08-11：为每个 `touchFrames[]` 元素写入单调 `metadataEpoch`，记录级 epoch 固定对应首帧；同一元数据指纹保持版本，记录级显示快照、逐帧 View 尺寸或输入设备元数据变化时递增。采集审计新增正整数、根级首帧一致和禁止回退三道门，并保留未逐事件采集旋转/Insets 的能力边界。
+- 2026-08-11：使用全部 29,736 条 schema v6 原始记录重建因果时间网格，29,513 条清洗样本完成无重力与重力差分双模型 80 轮全量拟合；导出两个独立 Android 实验模型资源并加入可选目录，保留旧默认模型用于真机 A/B。
+
+## 远程模型下发与运行时激活
+
+### 目标与边界
+
+- Android 端远程下发只支持 `time_grid_groupnorm_cnn_v1` 的 runtime bundle；旧 `12x21` CNN 继续通过 APK assets 目录加载，不改变其已有回退路径。
+- 远程 bundle 仅接受两套因果时间网格合同：`causal_time_grid_imu11_touch7_mask5_delta_gravity_v1` 的 `[9,23]`，或 `causal_time_grid_touch7_mask5_no_gravity_v1` 的 `[9,20]`。
+- 训练产物必须显式写入 `deploymentAllowed=true` 才允许发布到手机。`evaluationScope=all_data_fit_only` 的全量拟合实验模型即使能推理，也不得作为线上下发目标。
+
+### Android 更新链路
+
+1. `AispectModelUpdateScheduler` 在 App 前台启动时通过 WorkManager 提交带网络约束的唯一更新任务；构建参数 `MODEL_API_BASE_URL` 为空时不发起网络请求。
+2. `AispectModelRefreshWorker` 生成稳定安装 ID、登记设备信息，并创建 `AispectModelHttpClient` 请求模型 assignment、下载 `manifest.json`、`weights.json`、`scaler.json` 三件套和上报更新结果。
+3. `AispectRemoteModelUpdater` 校验 assignment 的模型格式和特征 schema、逐件核对大小与 SHA-256，再交给 `AispectRemoteModelStore` 暂存和激活。
+4. `AispectRemoteBundleValidator` 对 manifest、标签顺序、输入矩阵、feature names、GroupNorm 张量形状、文件哈希和 `deploymentAllowed` 执行严格校验。任何不满足的 bundle 都不会影响现有运行模型。
+5. `AispectRemoteModelStore` 只允许 `modelId/version` 的安全路径段；先在 `staging` 验证，再原子移动至 `versions`，状态文件维护 `current` 和 `previous`。新版本损坏时可恢复上一已验证版本。
+6. `AispectImpactCNNClassifier` 优先加载已激活的远程 bundle；远程模型不可用、无效或加载失败时，自动回退到 APK assets catalog。
+7. `AispectModelRuntimeController` 在触摸期间只记录 reload pending；触摸结束后才通过主线程 reload，避免同一次按压的前后帧使用不同模型。
+
+### 后端合同
+
+- assignment 通过 `/api/v1/model-assignment` 返回模型 ID、version、schema、format 及三件 artifact 的 URL、大小和 SHA-256。
+- 更新结果通过 `/api/v1/model-update-events` 回执；设备信息通过 `/api/v1/devices/register` 登记。登记或回执失败不会回滚已经完成的本地激活。
+- 后端发布校验器接受 `aispect-time-grid-groupnorm-v1` / `aispect-time-grid-json-v1`，并要求 manifest 与 scaler 的 `inputContract` 一致。
+
+### 构建依赖
+
+- `aispect-core` 使用 `androidx.work:work-runtime:2.9.1` 承担网络约束、唯一任务与失败重试；应用和 library manifest 都声明 `INTERNET`、`ACCESS_NETWORK_STATE`。
+- Android Gradle 仓库按 `maven.aliyun.com/repository/google -> google() -> mavenCentral()` 回退。该镜像仅用于 Windows 开发机的依赖可达性，不改变 APK 的联网目标或远程模型 API。
+
+### 修改日志
+
+- 2026-08-13：新增远程时间网格模型的 assignment 下载、哈希/合同校验、暂存原子激活、上一版本回退、触摸结束安全 reload 与后端发布合同；新增 Google Maven 镜像回退以保证 WorkManager 依赖可构建。
+- 2026-08-13：远程模型文件读写改为基于 `java.io` 的 API 24 兼容实现，避免 Android 低版本设备调用 `java.nio.file` 导致运行时崩溃；核心校验、下载和激活合同保持不变。
+
+## 可复用 Android 触摸 SDK 整合
+
+- 目标目录 `C:\codeDev\cnn\sdk\aispect-touch-android` 以 `eyes/android/aispect-core` 的公开 `com.zhifaios.eyes.touch.*` API、Maven 发布、canonical assignment、下载模型不可变版本存储与 current/previous 回滚为产品边界；不复制宿主 App、采集 UI、JSON 数据集、训练脚本、构建缓存或实验模型目录。
+- `AispectImpactCNNClassifier` 同时保持旧版 release CNN 路径与新 `time_grid_groupnorm_cnn_v1` 路径。模型选择只依赖显式 `runtimeArchitecture` 和 `featureContract`，不根据通道数推断；远程时间网格只接受 `causal_time_grid_imu11_touch7_mask5_delta_gravity_v1` `[9,23]` 与 `causal_time_grid_touch7_mask5_no_gravity_v1` `[9,20]`。
+- `AispectRemoteModelAssignment`、`AispectCanonicalModelAssignment` 与 `AispectModelBundleValidator` 为两种时间网格合同增加独立校验分支。通过 canonical assignment 的 `modelType=time_grid_groupnorm_cnn_v1` 和 `featureSchemaId=aispect-time-grid-groupnorm-v1` 声明，仍须逐项校验标签顺序、九槽矩阵、特征顺序、GroupNorm 张量和 SHA-256；失败下载不能改变当前已验证模型。
+- `AispectImpactSignalCollector` 为每个 IMU 帧写入硬件 `sensorTimestampElapsedRealtimeNanos` 与接收 `receivedElapsedRealtimeNanos`。`AispectCollectionController` 以 `ACTION_DOWN` 转换得到的同一 elapsed-realtime 原点记录触摸帧，只有 `-15ms...+25ms` 九槽都具有真实左右支撑且未在 `+25ms` 前抬起时才发布一次因果结果。该结果使用公开 `PRESS` 事件回调，触摸结束时按序列号去重；触摸期间的模型更新继续延迟到触摸完成。
+- SDK 内置资源只保留一个稳定的旧版四分类 fallback `lemon_tao_full4_enhanced_patch21_no_confidence`。历史、消融和全量拟合实验模型不再随 SDK 分发；新因果模型只能经远程合同验证后激活。
+
+### 修改日志
+
+- 2026-08-14：新建独立 Android SDK 暂存整合目录并完成 causal GroupNorm 运行时、canonical 远程模型合同、双时钟 `PRESS` 发布门和单 fallback 资产收缩；新增合同、远程校验、发布门和公开 PRESS 映射的 JVM 回归测试。
+
+## 可复用 iOS 触摸 SDK 正式化
+
+- 目标目录 `C:\codeDev\cnn\sdk\aispect-touch-ios` 建立 Swift Package 双层结构：`AispectTouchCore` 只含 Foundation/CryptoKit 可测试的因果特征、模型合同与运行时基础类型；`AispectTouch` 保留 UIKit/CoreMotion 采集与宿主生命周期集成。该分层避免传感器/界面代码进入模型和远程更新逻辑。
+- `AispectFeatureContract` 固定支持 `causal_time_grid_touch7_mask5_no_gravity_v1` `[9,20]` 与 `causal_time_grid_imu11_touch7_mask5_delta_gravity_v1` `[9,23]`。物理时间槽为 `-15,-10,-5,0,5,10,15,20,25ms`，标签顺序固定为 `thumb_light`、`thumb_heavy`、`index_light`、`index_heavy`。
+- `AispectCausalPressFeatureBuilder` 接收具有传感器时间与接收时间的 `AispectIMUSample`，按传感器时间线性插值并限制最大支撑间隔为 `max(10ms, 4*局部中位间隔)`；触摸 `AispectTouchObservation` 以事件时间和接收时间共同执行零阶保持，禁止读取目标时间之后发生或尚未到达的触摸信息。抬起早于 `down+25ms`、端点无支撑、时间倒序和无效尺寸均拒绝，不补零或外推。
+- 触摸特征保留坐标归一化、压力、面积、长短轴、轴比、指针数和独立可用性掩码；尺寸按当前屏幕对角线归一化，缺失字段以数值占位及掩码表达。`no_gravity` 删除绝对重力；`delta_gravity` 仅使用相邻物理槽的重力差，首槽固定为零。
+
+### 修改日志
+
+- 2026-08-16：开始 iOS 正式 SDK 落地，新增 Swift Package 核心合同、九槽因果特征构造器和对应单元测试；Windows 机器未安装 Swift，测试待 macOS/Xcode 环境执行。
+- 2026-08-16：新增 iOS JSON GroupNorm CNN 运行时与 bundle 验证器，逐项校验 iOS 平台、部署许可、四分类标签、两种九槽特征合同、张量形状、模型文件路径/大小/SHA-256；当前只形成本地 SDK 核心，远程下载与 UIKit 生命周期接入尚未完成。
+- 2026-08-16：新增 iOS `AispectPendingModelActivation`，模型更新在触摸活动期间只进入 pending，触摸空闲后才能切换，保证同一按压序列不会跨模型。

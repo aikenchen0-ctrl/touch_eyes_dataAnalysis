@@ -176,11 +176,11 @@ def collect_contact_stats(data):
         y_norm_sum += y_norm
         width = max(width, infer_axis_size(frame.get("x"), x_norm))
         height = max(height, infer_axis_size(frame.get("y"), y_norm))
-        major = first_positive(frame.get("touchMajor"), frame.get("toolMajor"))
-        minor = first_positive(frame.get("touchMinor"), frame.get("toolMinor"))
+        major = first_positive(frame.get("touchMajor"), 0.0)
+        minor = first_positive(frame.get("touchMinor"), 0.0)
         if major > 0:
             raw_major = max(raw_major, major)
-            source = "ellipse_major_minor" if finite_float(frame.get("touchMajor"), 0.0) > 0 else "tool_major_minor"
+            source = "ellipse_major_minor" if finite_float(frame.get("touchMajor"), 0.0) > 0 else "missing_touch_major"
             valid = True
         if minor > 0:
             raw_minor = max(raw_minor, minor)

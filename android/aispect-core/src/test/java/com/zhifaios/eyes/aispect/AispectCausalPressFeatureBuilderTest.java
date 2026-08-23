@@ -125,8 +125,8 @@ public final class AispectCausalPressFeatureBuilderTest {
                 350L
         );
         List<AispectTouchFrame> touches = new ArrayList<>();
-        touches.add(AispectTouchFrame.forTesting(90L, 100L, 0.25f, 0.5f, 300, 400, 1f, 0.5f, 50f, 25f, 0f, 1, true));
-        touches.add(AispectTouchFrame.forTesting(290L, 300L, 0.8f, 0.1f, 300, 400, 1f, 0.5f, 50f, 25f, 0f, 1, true));
+        touches.add(AispectTouchFrame.forTesting(90L, 100L, 75f, 200f, 300, 400, 1f, 0.5f, 50f, 25f, 0f, 1, true));
+        touches.add(AispectTouchFrame.forTesting(290L, 300L, 240f, 40f, 300, 400, 1f, 0.5f, 50f, 25f, 0f, 1, true));
 
         double[][] actual = AispectCausalPressFeatureBuilder.build(
                 new AispectModels.ImpactFrame[]{imu},

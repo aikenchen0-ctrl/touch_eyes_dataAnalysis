@@ -228,11 +228,11 @@ public final class AispectContactEncodingProfile {
                 stats.height = Math.max(stats.height, frame.height);
                 stats.centerXNorm += frame.xNorm;
                 stats.centerYNorm += frame.yNorm;
-                double major = firstPositive(frame.touchMajor, frame.toolMajor);
-                double minor = firstPositive(frame.touchMinor, frame.toolMinor);
+                double major = firstPositive(frame.touchMajor);
+                double minor = firstPositive(frame.touchMinor);
                 if (major > 0) {
                     stats.rawMajorPx = Math.max(stats.rawMajorPx, major);
-                    stats.source = frame.touchMajor > 0 ? "ellipse_major_minor" : "tool_major_minor";
+                    stats.source = frame.touchMajor > 0 ? "touch_major" : "touch_major_unknown";
                     stats.valid = true;
                 }
                 if (minor > 0) {
@@ -266,7 +266,7 @@ public final class AispectContactEncodingProfile {
             stats.rawMinorPx = DEFAULT_SIGMA_PX * 2.0;
         } else if (stats.rawMinorPx <= 0) {
             stats.rawMinorPx = stats.rawMajorPx;
-            stats.source = "radius_or_major_circle";
+            stats.source = "touch_major_only_synthesized_minor";
         }
         if (stats.valid && stats.hasMinor) {
             stats.sigmaXPx = Math.max(1.0, stats.rawMajorPx * 0.5);
@@ -339,12 +339,9 @@ public final class AispectContactEncodingProfile {
         return array;
     }
 
-    private static double firstPositive(double first, double second) {
+    private static double firstPositive(double first) {
         if (Double.isFinite(first) && first > 0) {
             return first;
-        }
-        if (Double.isFinite(second) && second > 0) {
-            return second;
         }
         return 0;
     }

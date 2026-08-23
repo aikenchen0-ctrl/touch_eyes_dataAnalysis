@@ -86,6 +86,47 @@ public final class AispectSignalWindowBuilderTest {
     }
 
     @Test
+    public void dualAnchorWindowPreservesSensorProvenance() {
+        AispectSignalWindowBuilder builder = new AispectSignalWindowBuilder();
+        List<AispectModels.ImpactFrame> frames = new ArrayList<>();
+        for (int index = 0; index < 50; index++) {
+            frames.add(new AispectModels.ImpactFrame(
+                    index,
+                    0.1,
+                    0.2,
+                    0.3,
+                    0.4,
+                    0.5,
+                    0.6,
+                    0.7,
+                    0.8,
+                    0.9,
+                    0.25,
+                    0.75,
+                    index * 0.01 - 0.2,
+                    index * 0.01 - 0.3,
+                    index * 0.01,
+                    index * 10_000_000L,
+                    index * 10_000_000L + 100_000L,
+                    "linear_acceleration",
+                    7
+            ));
+        }
+
+        AispectSignalWindowBuilder.Window window = builder.buildDualAnchor(
+                frames,
+                0.2,
+                0.3,
+                100.0
+        );
+
+        assertEquals("linear_acceleration", window.frames[0].sensorSource);
+        assertEquals(7, window.frames[0].streamEpoch);
+        assertEquals("linear_acceleration", window.frames[window.frames.length - 1].sensorSource);
+        assertEquals(7, window.frames[window.frames.length - 1].streamEpoch);
+    }
+
+    @Test
     public void highRateDualAnchorWindowKeepsAtLeastEightyFiveMilliseconds() {
         AispectSignalWindowBuilder builder = new AispectSignalWindowBuilder();
         WindowFixture fixture = fixture(220, 100, 130, 250.0);

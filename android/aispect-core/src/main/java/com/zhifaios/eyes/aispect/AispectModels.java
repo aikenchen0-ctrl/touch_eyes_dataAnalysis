@@ -47,11 +47,11 @@ public final class AispectModels {
         }
 
         public static String normalizeUserName(String value) {
-            return value == null ? "" : value.trim();
+            return value == null ? "" : value;
         }
 
         public static boolean isValidUserName(String value) {
-            return !normalizeUserName(value).isEmpty();
+            return !normalizeUserName(value).trim().isEmpty();
         }
 
         JSONObject toJson() throws JSONException {
@@ -208,6 +208,9 @@ public final class AispectModels {
         public final double timestampSeconds;
         public final long sensorTimestampElapsedRealtimeNanos;
         public final long receivedElapsedRealtimeNanos;
+        public final String sensorSource;
+        public final int streamEpoch;
+        public final boolean trainingInput;
 
         public ImpactFrame(
                 double delta,
@@ -243,7 +246,9 @@ public final class AispectModels {
                     timeSinceAnchor,
                     timestampSeconds,
                     0L,
-                    0L
+                    0L,
+                    "",
+                    0
             );
         }
 
@@ -266,6 +271,50 @@ public final class AispectModels {
                 long sensorTimestampElapsedRealtimeNanos,
                 long receivedElapsedRealtimeNanos
         ) {
+            this(
+                    delta,
+                    x,
+                    y,
+                    z,
+                    rotationRateX,
+                    rotationRateY,
+                    rotationRateZ,
+                    gravityX,
+                    gravityY,
+                    gravityZ,
+                    xNorm,
+                    yNorm,
+                    timeSinceTouchDown,
+                    timeSinceAnchor,
+                    timestampSeconds,
+                    sensorTimestampElapsedRealtimeNanos,
+                    receivedElapsedRealtimeNanos,
+                    "",
+                    0
+            );
+        }
+
+        public ImpactFrame(
+                double delta,
+                double x,
+                double y,
+                double z,
+                double rotationRateX,
+                double rotationRateY,
+                double rotationRateZ,
+                double gravityX,
+                double gravityY,
+                double gravityZ,
+                double xNorm,
+                double yNorm,
+                double timeSinceTouchDown,
+                double timeSinceAnchor,
+                double timestampSeconds,
+                long sensorTimestampElapsedRealtimeNanos,
+                long receivedElapsedRealtimeNanos,
+                String sensorSource,
+                int streamEpoch
+        ) {
             this.delta = delta;
             this.x = x;
             this.y = y;
@@ -283,6 +332,9 @@ public final class AispectModels {
             this.timestampSeconds = timestampSeconds;
             this.sensorTimestampElapsedRealtimeNanos = sensorTimestampElapsedRealtimeNanos;
             this.receivedElapsedRealtimeNanos = receivedElapsedRealtimeNanos;
+            this.sensorSource = sensorSource == null ? "" : sensorSource;
+            this.streamEpoch = streamEpoch;
+            this.trainingInput = isTrainingAccelerationSource(this.sensorSource);
         }
 
         public static ImpactFrame zero() {
@@ -308,7 +360,15 @@ public final class AispectModels {
             json.put("timeSinceAnchor", timeSinceAnchor);
             json.put("sensorTimestampElapsedRealtimeNanos", sensorTimestampElapsedRealtimeNanos);
             json.put("receivedElapsedRealtimeNanos", receivedElapsedRealtimeNanos);
+            json.put("sensorSource", sensorSource);
+            json.put("streamEpoch", streamEpoch);
+            json.put("trainingInput", trainingInput);
             return json;
+        }
+
+        static boolean isTrainingAccelerationSource(String source) {
+            return "linear_acceleration".equals(source)
+                    || "accelerometer_minus_gravity".equals(source);
         }
     }
 

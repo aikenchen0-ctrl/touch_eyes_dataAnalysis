@@ -257,6 +257,27 @@ class CrossDeviceCausalFeatureTests(unittest.TestCase):
         self.assertAlmostEqual(-2.0, frames[0]["acceleration"][0], places=6)
         self.assertAlmostEqual(-9.8, frames[0]["acceleration"][2], places=6)
 
+    def test_accelerometer_minus_gravity_is_not_subtracted_twice(self):
+        fixture = self.load_fixture()
+        fixture["sensorMetadata"]["sensorSource"] = "accelerometer_minus_gravity"
+        fixture["sensorMetadata"]["gravityAvailable"] = True
+        frames = cross_device.canonical_imu_frames(
+            fixture["records"]["android_200hz"]["frames"],
+            fixture["sensorMetadata"],
+        )
+        self.assertAlmostEqual(-2.0, frames[0]["acceleration"][0], places=6)
+        self.assertAlmostEqual(0.0, frames[0]["acceleration"][2], places=6)
+
+    def test_raw_accelerometer_without_gravity_is_rejected_for_training(self):
+        fixture = self.load_fixture()
+        fixture["sensorMetadata"]["sensorSource"] = "accelerometer_raw_no_gravity"
+        fixture["sensorMetadata"]["accelerationTrainingInput"] = False
+        with self.assertRaisesRegex(RuntimeError, "raw_acceleration_training_input_forbidden"):
+            cross_device.canonical_imu_frames(
+                fixture["records"]["android_200hz"]["frames"],
+                fixture["sensorMetadata"],
+            )
+
     def test_median_gap_uses_same_upper_middle_rule_as_android(self):
         self.assertEqual(20, cross_device.upper_middle_median([10, 20]))
         self.assertEqual(20, cross_device.upper_middle_median([20, 10, 20]))

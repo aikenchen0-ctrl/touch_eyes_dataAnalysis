@@ -160,6 +160,8 @@ def canonical_imu_frames(frames, metadata):
             if source == "accelerometer":
                 raise RuntimeError("accelerometer_gravity_subtraction_required")
             acceleration = [value - gravity[index] for index, value in enumerate(acceleration)]
+        elif source == "accelerometer_raw_no_gravity":
+            raise RuntimeError("raw_acceleration_training_input_forbidden")
         rotation = transform_vector(
             matrix,
             [finite(frame.get("rotationRateX")), finite(frame.get("rotationRateY")), finite(frame.get("rotationRateZ"))],
@@ -192,10 +194,14 @@ def validate_sensor_metadata(metadata):
         "linear_acceleration",
         "linear_acceleration_sensor",
         "accelerometer_with_gravity",
+        "accelerometer_minus_gravity",
+        "accelerometer_raw_no_gravity",
         "accelerometer",
     ):
         raise RuntimeError("unsupported_android_sensor_source")
     if source == "accelerometer_with_gravity" and metadata.get("gravityAvailable") is not True:
+        raise RuntimeError("gravity_metadata_required")
+    if source == "accelerometer_minus_gravity" and metadata.get("gravityAvailable") is not True:
         raise RuntimeError("gravity_metadata_required")
 
 

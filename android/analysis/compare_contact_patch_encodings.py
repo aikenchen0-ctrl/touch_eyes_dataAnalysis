@@ -77,12 +77,10 @@ def make_sample(row, data):
         frame_major = max(
             0.0,
             finite_float(frame.get("touchMajor"), 0.0),
-            finite_float(frame.get("toolMajor"), 0.0),
         )
         frame_minor = max(
             0.0,
             finite_float(frame.get("touchMinor"), 0.0),
-            finite_float(frame.get("toolMinor"), 0.0),
         )
         if frame_major > major:
             major = frame_major

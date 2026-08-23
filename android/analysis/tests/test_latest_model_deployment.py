@@ -12,6 +12,10 @@ EXPERIMENTAL_MODEL_IDS = (
     "deduplicated_clean_v3_probe_patch21_domain_zhuo-oneplus-le2110",
     "deduplicated_clean_v3_probe_patch21_domain_zhuo-oneplus-phk110",
 )
+V6_ALL_DATA_MODEL_IDS = (
+    "time_grid_v6_all_no_gravity_20260811_experimental",
+    "time_grid_v6_all_delta_gravity_20260811_experimental",
+)
 ASSET_DIRECTORY = (
     REPOSITORY_ROOT
     / "android"
@@ -77,6 +81,29 @@ class LatestModelDeploymentTests(unittest.TestCase):
             )
             self.assertTrue(
                 (ASSET_DIRECTORY / f"AispectImpactCNNWeights_{model_id}.json").is_file()
+            )
+
+    def test_v6_all_data_models_are_selectable_with_assets(self):
+        catalog_path = ASSET_DIRECTORY / "AispectImpactCNNModelCatalog.json"
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        models_by_id = {model["id"]: model for model in catalog}
+
+        for model_id in V6_ALL_DATA_MODEL_IDS:
+            self.assertIn(model_id, models_by_id)
+            model = models_by_id[model_id]
+            self.assertEqual(
+                f"AispectTimeGridGroupNormScaler_{model_id}",
+                model["scalerResourceName"],
+            )
+            self.assertEqual(
+                f"AispectTimeGridGroupNormWeights_{model_id}",
+                model["weightsResourceName"],
+            )
+            self.assertTrue(
+                (ASSET_DIRECTORY / f"AispectTimeGridGroupNormScaler_{model_id}.json").is_file()
+            )
+            self.assertTrue(
+                (ASSET_DIRECTORY / f"AispectTimeGridGroupNormWeights_{model_id}.json").is_file()
             )
 
 

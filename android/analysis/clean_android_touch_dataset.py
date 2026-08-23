@@ -533,8 +533,9 @@ def touch_frame_stats(frames):
         times.append(finite_float(frame.get("eventTimeMillis"), 0))
         pressure = finite_float(frame.get("pressure"), 0)
         size = finite_float(frame.get("size"), 0)
-        major = max(0.0, finite_float(frame.get("touchMajor"), 0), finite_float(frame.get("toolMajor"), 0))
-        minor = max(0.0, finite_float(frame.get("touchMinor"), 0), finite_float(frame.get("toolMinor"), 0))
+        # 工具长轴不是接触长轴，缺失时保留缺失，不用工具轴覆盖触摸轴。
+        major = max(0.0, finite_float(frame.get("touchMajor"), 0))
+        minor = max(0.0, finite_float(frame.get("touchMinor"), 0))
         majors.append(major)
         minors.append(minor)
         values["max_pressure"] = max(values["max_pressure"], pressure)

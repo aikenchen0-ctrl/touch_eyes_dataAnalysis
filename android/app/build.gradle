@@ -17,6 +17,11 @@ android {
         versionCode 1
         versionName "1.0"
         buildConfigField "String", "DEFAULT_MODEL_ID", '"oneplus_four_class_after_recollect_hard_nearfull_weighted_old13_multichannel"'
+        def modelApiBaseUrl = project.findProperty("MODEL_API_BASE_URL") ?: ""
+        buildConfigField "String", "MODEL_API_BASE_URL", "\"${modelApiBaseUrl}\""
+        def collectionUploadBaseUrl = project.findProperty("COLLECTION_UPLOAD_BASE_URL") ?: "http://47.112.97.115"
+        buildConfigField "String", "COLLECTION_UPLOAD_BASE_URL", "\"${collectionUploadBaseUrl}\""
+        buildConfigField "String", "COLLECTION_APP_ID", '"com.zhifaios.eyes.android"'
     }
 
     flavorDimensions "model"

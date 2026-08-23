@@ -1,0 +1,262 @@
+{
+  "channels": [
+    {
+      "center": 0.0,
+      "clipMax": null,
+      "clipMin": null,
+      "constant": false,
+      "fitCount": 265617,
+      "name": "x_norm",
+      "requiresTouchAvailability": false,
+      "scale": 1.0,
+      "strategy": "identity"
+    },
+    {
+      "center": 0.0,
+      "clipMax": null,
+      "clipMin": null,
+      "constant": false,
+      "fitCount": 265617,
+      "name": "y_norm",
+      "requiresTouchAvailability": false,
+      "scale": 1.0,
+      "strategy": "identity"
+    },
+    {
+      "center": -0.02642161023169233,
+      "clipMax": 8.0,
+      "clipMin": -8.0,
+      "constant": false,
+      "fitCount": 265617,
+      "name": "userAcceleration.x",
+      "requiresTouchAvailability": false,
+      "scale": 0.612398886323205,
+      "strategy": "robust_median_iqr"
+    },
+    {
+      "center": -0.018083160651175594,
+      "clipMax": 8.0,
+      "clipMin": -8.0,
+      "constant": false,
+      "fitCount": 265617,
+      "name": "userAcceleration.y",
+      "requiresTouchAvailability": false,
+      "scale": 0.4487184101359456,
+      "strategy": "robust_median_iqr"
+    },
+    {
+      "center": -0.09721929775605964,
+      "clipMax": 8.0,
+      "clipMin": -8.0,
+      "constant": false,
+      "fitCount": 265617,
+      "name": "userAcceleration.z",
+      "requiresTouchAvailability": false,
+      "scale": 1.0341647156850575,
+      "strategy": "robust_median_iqr"
+    },
+    {
+      "center": 0.007980785894592052,
+      "clipMax": 8.0,
+      "clipMin": -8.0,
+      "constant": false,
+      "fitCount": 265617,
+      "name": "rotationRate.x",
+      "requiresTouchAvailability": false,
+      "scale": 0.20274584319625238,
+      "strategy": "robust_median_iqr"
+    },
+    {
+      "center": 0.009000896985643068,
+      "clipMax": 8.0,
+      "clipMin": -8.0,
+      "constant": false,
+      "fitCount": 265617,
+      "name": "rotationRate.y",
+      "requiresTouchAvailability": false,
+      "scale": 0.3462539462263688,
+      "strategy": "robust_median_iqr"
+    },
+    {
+      "center": -0.0007637132535256467,
+      "clipMax": 8.0,
+      "clipMin": -8.0,
+      "constant": false,
+      "fitCount": 265617,
+      "name": "rotationRate.z",
+      "requiresTouchAvailability": false,
+      "scale": 0.16444000976075476,
+      "strategy": "robust_median_iqr"
+    },
+    {
+      "center": 1.0,
+      "clipMax": 8.0,
+      "clipMin": -8.0,
+      "constant": true,
+      "fitCount": 136139,
+      "name": "pressure",
+      "requiresTouchAvailability": true,
+      "scale": 1.0,
+      "strategy": "robust_median_iqr"
+    },
+    {
+      "center": 0.04313725605607033,
+      "clipMax": 8.0,
+      "clipMin": -8.0,
+      "constant": false,
+      "fitCount": 136139,
+      "name": "size",
+      "requiresTouchAvailability": true,
+      "scale": 0.017647061496973038,
+      "strategy": "robust_median_iqr"
+    },
+    {
+      "center": 0.00037795803321201985,
+      "clipMax": 8.0,
+      "clipMin": -8.0,
+      "constant": false,
+      "fitCount": 136139,
+      "name": "major_norm",
+      "requiresTouchAvailability": true,
+      "scale": 0.00024051875957858477,
+      "strategy": "robust_median_iqr"
+    },
+    {
+      "center": 0.00037795803321201985,
+      "clipMax": 8.0,
+      "clipMin": -8.0,
+      "constant": false,
+      "fitCount": 136139,
+      "name": "minor_norm",
+      "requiresTouchAvailability": true,
+      "scale": 6.871965729676646e-05,
+      "strategy": "robust_median_iqr"
+    },
+    {
+      "center": 0.0,
+      "clipMax": 8.0,
+      "clipMin": -8.0,
+      "constant": false,
+      "fitCount": 136139,
+      "name": "log_axis_ratio",
+      "requiresTouchAvailability": true,
+      "scale": 0.5877867046385481,
+      "strategy": "robust_median_iqr"
+    },
+    {
+      "center": 1.0,
+      "clipMax": 8.0,
+      "clipMin": -8.0,
+      "constant": true,
+      "fitCount": 136139,
+      "name": "pointer_count",
+      "requiresTouchAvailability": true,
+      "scale": 1.0,
+      "strategy": "robust_median_iqr"
+    },
+    {
+      "center": 0.0,
+      "clipMax": null,
+      "clipMin": null,
+      "constant": false,
+      "fitCount": 265617,
+      "name": "touch_valid",
+      "requiresTouchAvailability": false,
+      "scale": 1.0,
+      "strategy": "identity"
+    },
+    {
+      "center": 0.0,
+      "clipMax": null,
+      "clipMin": null,
+      "constant": false,
+      "fitCount": 265617,
+      "name": "pressure_available",
+      "requiresTouchAvailability": false,
+      "scale": 1.0,
+      "strategy": "identity"
+    },
+    {
+      "center": 0.0,
+      "clipMax": null,
+      "clipMin": null,
+      "constant": false,
+      "fitCount": 265617,
+      "name": "size_available",
+      "requiresTouchAvailability": false,
+      "scale": 1.0,
+      "strategy": "identity"
+    },
+    {
+      "center": 0.0,
+      "clipMax": null,
+      "clipMin": null,
+      "constant": false,
+      "fitCount": 265617,
+      "name": "major_available",
+      "requiresTouchAvailability": false,
+      "scale": 1.0,
+      "strategy": "identity"
+    },
+    {
+      "center": 0.0,
+      "clipMax": null,
+      "clipMin": null,
+      "constant": false,
+      "fitCount": 265617,
+      "name": "minor_available",
+      "requiresTouchAvailability": false,
+      "scale": 1.0,
+      "strategy": "identity"
+    },
+    {
+      "center": 0.0,
+      "clipMax": null,
+      "clipMin": null,
+      "constant": false,
+      "fitCount": 265617,
+      "name": "pointer_count_available",
+      "requiresTouchAvailability": false,
+      "scale": 1.0,
+      "strategy": "identity"
+    }
+  ],
+  "classCount": 4,
+  "deploymentAllowed": false,
+  "evaluationScope": "all_data_fit_only",
+  "featureContract": "causal_time_grid_touch7_mask5_no_gravity_v1",
+  "featureNames": [
+    "x_norm",
+    "y_norm",
+    "userAcceleration.x",
+    "userAcceleration.y",
+    "userAcceleration.z",
+    "rotationRate.x",
+    "rotationRate.y",
+    "rotationRate.z",
+    "pressure",
+    "size",
+    "major_norm",
+    "minor_norm",
+    "log_axis_ratio",
+    "pointer_count",
+    "touch_valid",
+    "pressure_available",
+    "size_available",
+    "major_available",
+    "minor_available",
+    "pointer_count_available"
+  ],
+  "frameCount": 9,
+  "labelOrder": [
+    "thumb_light",
+    "thumb_heavy",
+    "index_light",
+    "index_heavy"
+  ],
+  "matrixShape": [
+    9,
+    20
+  ],
+  "runtimeArchitecture": "time_grid_groupnorm_cnn_v1"
+}

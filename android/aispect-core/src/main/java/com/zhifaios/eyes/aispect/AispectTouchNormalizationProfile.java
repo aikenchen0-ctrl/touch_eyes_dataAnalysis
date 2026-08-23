@@ -95,6 +95,8 @@ public final class AispectTouchNormalizationProfile {
         public final boolean hasRadius;
         public final boolean hasShape;
         public final boolean hasPressureOrSize;
+        public final boolean touchAxesSemanticallyValid;
+        public final boolean toolAxesIndependent;
         public final int frameCount;
         public final String source;
 
@@ -113,6 +115,8 @@ public final class AispectTouchNormalizationProfile {
                 boolean hasRadius,
                 boolean hasShape,
                 boolean hasPressureOrSize,
+                boolean touchAxesSemanticallyValid,
+                boolean toolAxesIndependent,
                 int frameCount,
                 String source
         ) {
@@ -130,6 +134,8 @@ public final class AispectTouchNormalizationProfile {
             this.hasRadius = hasRadius;
             this.hasShape = hasShape;
             this.hasPressureOrSize = hasPressureOrSize;
+            this.touchAxesSemanticallyValid = touchAxesSemanticallyValid;
+            this.toolAxesIndependent = toolAxesIndependent;
             this.frameCount = frameCount;
             this.source = source;
         }
@@ -158,6 +164,8 @@ public final class AispectTouchNormalizationProfile {
             quality.put("hasRadius", hasRadius);
             quality.put("hasShape", hasShape);
             quality.put("hasPressureOrSize", hasPressureOrSize);
+            quality.put("touchAxesSemanticallyValid", touchAxesSemanticallyValid);
+            quality.put("toolAxesIndependent", toolAxesIndependent);
             quality.put("frameCount", frameCount);
             quality.put("source", source);
             json.put("fieldQuality", quality);

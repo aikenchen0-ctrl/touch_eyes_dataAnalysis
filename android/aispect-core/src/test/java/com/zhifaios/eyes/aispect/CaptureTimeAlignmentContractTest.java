@@ -15,7 +15,12 @@ public final class CaptureTimeAlignmentContractTest {
         JSONObject json = AispectDataLogger.timeAlignmentToJson(10L, 20L, 30L, 40L);
 
         assertEquals(6, AispectDataLogger.RAW_SCHEMA_VERSION);
+        assertEquals(2, json.getInt("schemaVersion"));
         assertEquals("elapsedRealtimeNanos", json.getString("clock"));
+        assertEquals(
+                "touch_event_time_millis_from_down_anchor_v2",
+                json.getString("touchTimestampConversion")
+        );
         assertEquals(
                 "touchReceivedElapsedRealtimeNanos<=imuReceivedElapsedRealtimeNanos",
                 json.getString("availabilityRule")

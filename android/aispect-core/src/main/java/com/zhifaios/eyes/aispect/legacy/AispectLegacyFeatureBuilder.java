@@ -35,7 +35,6 @@ public final class AispectLegacyFeatureBuilder {
     ) {
         if (window == null || frameIndices == null || featureNames == null
                 || center == null || scale == null
-                || frameIndices.length != featureNames.length
                 || inputChannels != featureNames.length
                 || center.length != inputChannels
                 || scale.length != inputChannels) {

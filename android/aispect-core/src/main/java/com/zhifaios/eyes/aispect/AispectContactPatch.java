@@ -65,11 +65,6 @@ public final class AispectContactPatch {
         double sigmaY = DEFAULT_SIGMA_NORM;
         double orientation = 0;
 
-        if (major <= 0) {
-            major = positiveFinite(frame.toolMajor);
-            minor = positiveFinite(frame.toolMinor);
-        }
-
         if (major > 0 && minor > 0) {
             source = "ellipse_major_minor";
             valid = true;
@@ -78,7 +73,7 @@ public final class AispectContactPatch {
             sigmaY = Math.max(minor * 0.5, 1.0);
             orientation = finite(frame.orientation, 0);
         } else if (major > 0) {
-            source = "radius_from_major";
+            source = "touch_major_only_synthesized_minor";
             valid = true;
             defaultApplied = false;
             sigmaX = Math.max(major * 0.5, 1.0);

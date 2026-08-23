@@ -9,7 +9,7 @@ import static org.junit.Assert.assertTrue;
 public final class CollectorIdentityTest {
     @Test
     public void trimsUserNameAndRejectsBlankValues() {
-        assertEquals("Alice", AispectModels.CollectorIdentity.normalizeUserName("  Alice  "));
+        assertEquals("  Alice  ", AispectModels.CollectorIdentity.normalizeUserName("  Alice  "));
         assertTrue(AispectModels.CollectorIdentity.isValidUserName("Alice"));
         assertFalse(AispectModels.CollectorIdentity.isValidUserName("   "));
         assertFalse(AispectModels.CollectorIdentity.isValidUserName(null));

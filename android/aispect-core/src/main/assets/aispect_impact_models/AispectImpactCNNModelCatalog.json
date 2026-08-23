@@ -54,6 +54,18 @@
     "weightsResourceName": "AispectImpactCNNWeights_deduplicated_clean_v3_probe_patch21_domain_zhuo-oneplus-phk110"
   },
   {
+    "displayName": "V6 full-data no gravity 20260811 experimental",
+    "id": "time_grid_v6_all_no_gravity_20260811_experimental",
+    "scalerResourceName": "AispectTimeGridGroupNormScaler_time_grid_v6_all_no_gravity_20260811_experimental",
+    "weightsResourceName": "AispectTimeGridGroupNormWeights_time_grid_v6_all_no_gravity_20260811_experimental"
+  },
+  {
+    "displayName": "V6 full-data delta gravity 20260811 experimental",
+    "id": "time_grid_v6_all_delta_gravity_20260811_experimental",
+    "scalerResourceName": "AispectTimeGridGroupNormScaler_time_grid_v6_all_delta_gravity_20260811_experimental",
+    "weightsResourceName": "AispectTimeGridGroupNormWeights_time_grid_v6_all_delta_gravity_20260811_experimental"
+  },
+  {
     "displayName": "Experimental touch23 all-data fit only",
     "id": "time_grid_all_data_touch23_experimental",
     "scalerResourceName": "AispectTimeGridGroupNormScaler_time_grid_all_data_touch23_experimental",

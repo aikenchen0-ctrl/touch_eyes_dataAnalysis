@@ -37,6 +37,8 @@ import com.zhifaios.eyes.aispect.AispectDataLogger;
 import com.zhifaios.eyes.aispect.AispectDeviceCapabilityProfiler;
 import com.zhifaios.eyes.aispect.AispectImpactCNNClassifier;
 import com.zhifaios.eyes.aispect.AispectModels;
+import com.zhifaios.eyes.aispect.AispectModelUpdateScheduler;
+import com.zhifaios.eyes.aispect.AispectModelUpdateTrigger;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -122,12 +124,28 @@ public final class MainActivity extends Activity implements AispectCollectionCon
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         controller = new AispectCollectionController(this);
-        controller.setSelectedModelId(BuildConfig.DEFAULT_MODEL_ID);
+        controller.configureUpload(
+                BuildConfig.COLLECTION_UPLOAD_BASE_URL,
+                BuildConfig.COLLECTION_APP_ID,
+                android.os.Build.MODEL,
+                BuildConfig.VERSION_NAME
+        );
+        if (!controller.hasActiveRemoteModel()) {
+            controller.setSelectedModelId(BuildConfig.DEFAULT_MODEL_ID);
+        }
         controller.config().enableCnnDiagnostics = false;
         controller.interactionEngine().config().minimumSampleIntervalMs = 4L;
         controller.interactionEngine().config().dragActivationRadiusPx = dp(28);
         controller.interactionEngine().config().heavyLiftOffsetThresholdPx = dp(4);
         controller.setListener(this);
+        AispectModelUpdateScheduler.refreshNow(
+                this,
+                BuildConfig.MODEL_API_BASE_URL,
+                getPackageName(),
+                "1.0.0",
+                BuildConfig.VERSION_NAME,
+                AispectModelUpdateTrigger.FOREGROUND
+        );
         modelInfos = controller.availableModels();
         selectedModelIndex = defaultModelIndex(controller.selectedModelInfo());
         buildUi();
@@ -655,6 +673,7 @@ public final class MainActivity extends Activity implements AispectCollectionCon
         if (status == null || impactPanel == null) {
             return;
         }
+        modelInfos = controller.availableModels();
         if (status.selectedModelInfo != null) {
             selectedModelIndex = modelIndexForId(status.selectedModelInfo.id);
             updateModelPanel(status.selectedModelInfo);
