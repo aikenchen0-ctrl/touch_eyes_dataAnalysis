@@ -80,10 +80,25 @@ public final class AispectImpactCNNClassifier {
     private final Map<String, Boolean> timeGridRuntimeLoadAttempts = new HashMap<>();
     private final Map<String, AispectStatsMlpRuntime> statsMlpRuntimeCache = new HashMap<>();
     private final Map<String, Boolean> statsMlpRuntimeLoadAttempts = new HashMap<>();
+    private AispectCausalSizeBaseline causalSizeBaseline;
+    private String causalSizeDeviceKey = "";
     private List<ModelInfo> catalogModels;
 
     public AispectImpactCNNClassifier(Context context) {
         this.context = context.getApplicationContext();
+    }
+
+    public void setDeviceIdentity(String deviceKey) {
+        String normalized = deviceKey == null ? "" : deviceKey.trim();
+        if (normalized.equals(causalSizeDeviceKey)
+                && causalSizeBaseline != null) {
+            return;
+        }
+        causalSizeDeviceKey = normalized;
+        causalSizeBaseline = new AispectCausalSizeBaseline(
+                context,
+                normalized
+        );
     }
 
     public static boolean usesCausalPressFeatureContract(String featureContract) {
@@ -226,7 +241,12 @@ public final class AispectImpactCNNClassifier {
                     window.frames,
                     touchFrames,
                     Math.round(window.downAnchorTimestampSeconds * 1_000_000_000.0),
-                    statsMlpRuntime.featureContract()
+                    statsMlpRuntime.featureContract(),
+                    AispectStatsMlpRuntime.V4_FEATURE_CONTRACT.equals(
+                            statsMlpRuntime.featureContract()
+                    )
+                            ? causalSizeBaseline()
+                            : null
             );
             double[] probabilities = statsMlpRuntime.predict(raw);
             return probabilities == null
@@ -430,6 +450,26 @@ public final class AispectImpactCNNClassifier {
             }
         }
         return statsMlpRuntimeCache.get(modelId);
+    }
+
+    private AispectCausalSizeBaseline causalSizeBaseline() {
+        if (causalSizeBaseline == null) {
+            causalSizeBaseline = new AispectCausalSizeBaseline(
+                    context,
+                    causalSizeDeviceKey
+            );
+        }
+        return causalSizeBaseline;
+    }
+
+    /**
+     * 中文注释：只允许采集控制器在抬手后的完整窗口落定后调用。
+     * 预测发生在按下期，此时当前触摸尚未结束，不能写入历史分母。
+     */
+    public void observeCompletedCausalSizeTouch(
+            List<AispectTouchFrame> touchFrames
+    ) {
+        causalSizeBaseline().observeCompletedTouch(touchFrames);
     }
 
     private List<ModelInfo> loadCatalogModels() {

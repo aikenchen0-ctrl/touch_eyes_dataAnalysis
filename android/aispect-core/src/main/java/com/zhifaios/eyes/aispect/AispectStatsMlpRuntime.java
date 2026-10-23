@@ -21,12 +21,16 @@ final class AispectStatsMlpRuntime {
     static final String PRIMARY_TASK = "strength_gate";
     static final String FEATURE_CONTRACT =
             "causal_time_grid_imu11_touch7_mask5_stats_mlp_v3";
+    static final String V4_FEATURE_CONTRACT =
+            "causal_time_grid_imu11_touch7_mask5_stats_mlp_v4";
     static final String V2_FEATURE_CONTRACT =
             "causal_time_grid_imu11_touch7_mask5_stats_mlp_v2";
     static final String LEGACY_FEATURE_CONTRACT =
             "causal_time_grid_imu11_touch7_mask5_stats_mlp_v1";
     static final String SOURCE_FEATURE_CONTRACT =
             "causal_time_grid_imu11_touch7_mask5_v5";
+    static final String V4_SOURCE_FEATURE_CONTRACT =
+            "causal_time_grid_imu11_touch7_mask5_v6";
     static final String[] FEATURE_NAMES = new String[]{
             "x_norm",
             "y_norm",
@@ -37,6 +41,18 @@ final class AispectStatsMlpRuntime {
             "rotationRate.y",
             "rotationRate.z",
             "size",
+            "log_axis_ratio"
+    };
+    static final String[] V4_FEATURE_NAMES = new String[]{
+            "x_norm",
+            "y_norm",
+            "userAcceleration.x",
+            "userAcceleration.y",
+            "userAcceleration.z",
+            "rotationRate.x",
+            "rotationRate.y",
+            "rotationRate.z",
+            "log_causal_size_ratio",
             "log_axis_ratio"
     };
     static final int[] SOURCE_FEATURE_INDICES = new int[]{0, 1, 2, 3, 4, 5, 6, 7, 12, 15};
@@ -118,6 +134,31 @@ final class AispectStatsMlpRuntime {
             "minor_available",
             "pointer_count_available"
     };
+    static final String[] V4_SOURCE_FEATURE_NAMES = new String[]{
+            "x_norm",
+            "y_norm",
+            "userAcceleration.x",
+            "userAcceleration.y",
+            "userAcceleration.z",
+            "rotationRate.x",
+            "rotationRate.y",
+            "rotationRate.z",
+            "gravity.x",
+            "gravity.y",
+            "gravity.z",
+            "pressure",
+            "log_causal_size_ratio",
+            "major_norm",
+            "minor_norm",
+            "log_axis_ratio",
+            "pointer_count",
+            "touch_valid",
+            "pressure_available",
+            "size_available",
+            "major_available",
+            "minor_available",
+            "pointer_count_available"
+    };
     static final String[] LEGACY_LABEL_ORDER = new String[]{
             "thumb_light",
             "thumb_heavy",
@@ -149,11 +190,25 @@ final class AispectStatsMlpRuntime {
             "strength.weight",
             "strength.bias"
     ));
+    private static final Set<String> SIZE_BASELINE_KEYS = new HashSet<>(Arrays.asList(
+            "causal",
+            "currentTouchExcluded",
+            "deviceScope",
+            "historyScope",
+            "normalization",
+            "aggregation",
+            "withinTouchAggregation",
+            "minimumTouches",
+            "maximumTouches",
+            "logRatioClip",
+            "touchStatistics"
+    ));
 
     private final String featureContract;
     private final String[] featureNames;
     private final String[] labelOrder;
     private final boolean strengthGate;
+    private final boolean nanExcludedFromStats;
     private final SequenceChannel[] sequenceChannels;
     private final String[] statsFeatureNames;
     private final double[] statsCenter;
@@ -174,6 +229,7 @@ final class AispectStatsMlpRuntime {
             String[] featureNames,
             String[] labelOrder,
             boolean strengthGate,
+            boolean nanExcludedFromStats,
             SequenceChannel[] sequenceChannels,
             String[] statsFeatureNames,
             double[] statsCenter,
@@ -193,6 +249,7 @@ final class AispectStatsMlpRuntime {
         this.featureNames = featureNames;
         this.labelOrder = labelOrder;
         this.strengthGate = strengthGate;
+        this.nanExcludedFromStats = nanExcludedFromStats;
         this.sequenceChannels = sequenceChannels;
         this.statsFeatureNames = statsFeatureNames;
         this.statsCenter = statsCenter;
@@ -225,9 +282,69 @@ final class AispectStatsMlpRuntime {
         boolean strengthGate = ARCHITECTURE.equals(runtimeArchitecture);
         String featureContract = scaler.optString("featureContract", "");
         if (!FEATURE_CONTRACT.equals(featureContract)
+                && !V4_FEATURE_CONTRACT.equals(featureContract)
                 && !V2_FEATURE_CONTRACT.equals(featureContract)
                 && !LEGACY_FEATURE_CONTRACT.equals(featureContract)) {
             return null;
+        }
+        // 中文注释：新合同必须同时锁定因果接触尺度代理和统计缺失策略，
+        // 避免把设备原始尺寸误标成压力或真实牛顿力。
+        boolean causalSizeProxy = V4_FEATURE_CONTRACT.equals(featureContract);
+        if (causalSizeProxy) {
+            if (!strengthGate) {
+                return null;
+            }
+            JSONObject sizeBaseline = scaler.optJSONObject("sizeBaseline");
+            if (!V4_SOURCE_FEATURE_CONTRACT.equals(
+                    scaler.optString("sourceFeatureContract", "")
+            )
+                    || !"contact_area_proxy".equals(
+                    scaler.optString("sizeSemantics", "")
+            )
+                    || scaler.optBoolean("forceMeasurement", true)
+                    || !"nan_excluded_from_stats".equals(
+                    scaler.optString("missingValuePolicy", "")
+            )
+                    || sizeBaseline == null
+                    || !hasExactKeys(sizeBaseline, SIZE_BASELINE_KEYS)
+                    || !sizeBaseline.optBoolean("causal", false)
+                    || !sizeBaseline.optBoolean(
+                    "currentTouchExcluded",
+                    false
+            )
+                    || !"physical_device".equals(
+                    sizeBaseline.optString("deviceScope", "")
+            )
+                    || !"completed_touches_only".equals(
+                    sizeBaseline.optString("historyScope", "")
+            )
+                    || !"log_causal_device_median".equals(
+                    sizeBaseline.optString("normalization", "")
+            )
+                    || !"median".equals(
+                    sizeBaseline.optString("aggregation", "")
+            )
+                    || !"median".equals(
+                    sizeBaseline.optString("withinTouchAggregation", "")
+            )
+                    || sizeBaseline.optInt("minimumTouches", -1)
+                    != AispectCausalSizeBaseline.MINIMUM_TOUCHES
+                    || sizeBaseline.optInt("maximumTouches", -1)
+                    != AispectCausalSizeBaseline.MAXIMUM_TOUCHES
+                    || sizeBaseline.optDouble("logRatioClip", -1.0)
+                    != AispectCausalSizeBaseline.LOG_RATIO_CLIP
+                    || !matches(
+                    sizeBaseline.optJSONArray("touchStatistics"),
+                    new String[]{
+                            "mean",
+                            "std",
+                            "min",
+                            "max",
+                            "last_delta"
+                    }
+            )) {
+                return null;
+            }
         }
         // 中文注释：v3 必须同时锁定无方向字段的 v5 源合同，避免物理视图相同但源时序不同。
         if (FEATURE_CONTRACT.equals(featureContract)
@@ -237,7 +354,9 @@ final class AispectStatsMlpRuntime {
             return null;
         }
         String[] expectedSourceFeatureNames;
-        if (FEATURE_CONTRACT.equals(featureContract)) {
+        if (V4_FEATURE_CONTRACT.equals(featureContract)) {
+            expectedSourceFeatureNames = V4_SOURCE_FEATURE_NAMES;
+        } else if (FEATURE_CONTRACT.equals(featureContract)) {
             expectedSourceFeatureNames = SOURCE_FEATURE_NAMES;
         } else if (V2_FEATURE_CONTRACT.equals(featureContract)) {
             expectedSourceFeatureNames = V2_SOURCE_FEATURE_NAMES;
@@ -269,7 +388,13 @@ final class AispectStatsMlpRuntime {
         String[] statsFeatureNames = stringArray(scaler.getJSONArray("statsFeatureNames"));
         int[] sourceFeatureIndices = intArray(scaler.getJSONArray("sourceFeatureIndices"));
         int[] matrixShape = intArray(scaler.getJSONArray("matrixShape"));
-        if (!Arrays.equals(FEATURE_NAMES, featureNames)
+        String[] expectedFeatureNames = causalSizeProxy
+                ? V4_FEATURE_NAMES
+                : FEATURE_NAMES;
+        String[] expectedStatsFeatureNames = statsFeatureNames(
+                expectedFeatureNames
+        );
+        if (!Arrays.equals(expectedFeatureNames, featureNames)
                 || !Arrays.equals(expectedSourceFeatureNames, sourceFeatureNames)
                 || (strengthGate
                 ? !Arrays.equals(GATE_LABEL_ORDER, labelOrder)
@@ -290,13 +415,13 @@ final class AispectStatsMlpRuntime {
                         LEGACY_LABEL_ORDER,
                         diagnosticClassLabelOrder
                 ))
-                || !Arrays.equals(statsFeatureNames(), statsFeatureNames)
+                || !Arrays.equals(expectedStatsFeatureNames, statsFeatureNames)
                 || !Arrays.equals(SOURCE_FEATURE_INDICES, sourceFeatureIndices)
                 || matrixShape.length != 2
                 || matrixShape[0] != FRAME_COUNT
-                || matrixShape[1] != FEATURE_NAMES.length
+                || matrixShape[1] != expectedFeatureNames.length
                 || scaler.optInt("frameCount", -1) != FRAME_COUNT
-                || scaler.optInt("sequenceChannelCount", -1) != FEATURE_NAMES.length
+                || scaler.optInt("sequenceChannelCount", -1) != expectedFeatureNames.length
                 || scaler.optInt("statsFeatureCount", -1) != STATS_FEATURE_COUNT
                 || scaler.optInt(
                         "classCount",
@@ -312,7 +437,13 @@ final class AispectStatsMlpRuntime {
                 && scaler.getBoolean("dropoutAtInference")) {
             return null;
         }
-        SequenceChannel[] channels = channels(scaler.getJSONArray("sequenceChannels"), featureNames);
+        SequenceChannel[] channels = channels(
+                scaler.getJSONArray("sequenceChannels"),
+                featureNames
+        );
+        if (channels == null) {
+            return null;
+        }
         JSONObject statsScaler = scaler.getJSONObject("statsScaler");
         double[] statsCenter = numberArray(statsScaler.getJSONArray("center"));
         double[] statsScale = numberArray(statsScaler.getJSONArray("scale"));
@@ -320,6 +451,10 @@ final class AispectStatsMlpRuntime {
         double statsClipMax = statsScaler.optDouble("clipMax", 8.0);
         if (statsCenter.length != STATS_FEATURE_COUNT
                 || statsScale.length != STATS_FEATURE_COUNT
+                || !allFinite(statsCenter)
+                || !allPositiveFinite(statsScale)
+                || !Double.isFinite(statsClipMin)
+                || !Double.isFinite(statsClipMax)
                 || !(statsClipMin < statsClipMax)) {
             return null;
         }
@@ -346,6 +481,7 @@ final class AispectStatsMlpRuntime {
                 featureNames,
                 labelOrder,
                 strengthGate,
+                causalSizeProxy,
                 channels,
                 statsFeatureNames,
                 statsCenter,
@@ -369,6 +505,10 @@ final class AispectStatsMlpRuntime {
 
     String[] labelOrder() {
         return labelOrder.clone();
+    }
+
+    String[] featureNames() {
+        return featureNames.clone();
     }
 
     boolean isStrengthGate() {
@@ -403,16 +543,20 @@ final class AispectStatsMlpRuntime {
         if (raw == null || raw.length != FRAME_COUNT) {
             return null;
         }
-        double[][] normalized = new double[FRAME_COUNT][FEATURE_NAMES.length];
+        double[][] normalized = new double[FRAME_COUNT][featureNames.length];
         for (int frame = 0; frame < FRAME_COUNT; frame++) {
-            if (raw[frame] == null || raw[frame].length != FEATURE_NAMES.length) {
+            if (raw[frame] == null || raw[frame].length != featureNames.length) {
                 return null;
             }
-            for (int channel = 0; channel < FEATURE_NAMES.length; channel++) {
-                normalized[frame][channel] = sequenceChannels[channel].normalize(raw[frame][channel]);
+            for (int channel = 0; channel < featureNames.length; channel++) {
+                double value = raw[frame][channel];
+                normalized[frame][channel] = nanExcludedFromStats
+                        && !Double.isFinite(value)
+                        ? Double.NaN
+                        : sequenceChannels[channel].normalize(value);
             }
         }
-        double[] stats = statsFeatures(normalized);
+        double[] stats = statsFeatures(normalized, nanExcludedFromStats);
         for (int index = 0; index < stats.length; index++) {
             stats[index] = clip(
                     (stats[index] - statsCenter[index]) / statsScale[index],
@@ -431,9 +575,13 @@ final class AispectStatsMlpRuntime {
     }
 
     static String[] statsFeatureNames() {
+        return statsFeatureNames(FEATURE_NAMES);
+    }
+
+    static String[] statsFeatureNames(String[] physicalFeatureNames) {
         String[] names = new String[STATS_FEATURE_COUNT];
         int index = 0;
-        for (String featureName : FEATURE_NAMES) {
+        for (String featureName : physicalFeatureNames) {
             names[index++] = featureName + ".mean";
             names[index++] = featureName + ".std";
             names[index++] = featureName + ".min";
@@ -454,6 +602,13 @@ final class AispectStatsMlpRuntime {
     }
 
     static double[] statsFeatures(double[][] values) {
+        return statsFeatures(values, false);
+    }
+
+    static double[] statsFeatures(
+            double[][] values,
+            boolean excludeNonFinite
+    ) {
         if (values == null || values.length == 0 || values[0] == null) {
             throw new IllegalArgumentException("invalid_stats_input");
         }
@@ -468,24 +623,48 @@ final class AispectStatsMlpRuntime {
         int outputIndex = 0;
         for (int channel = 0; channel < channelCount; channel++) {
             double sum = 0.0;
-            double minimum = values[0][channel];
-            double maximum = values[0][channel];
+            double minimum = Double.POSITIVE_INFINITY;
+            double maximum = Double.NEGATIVE_INFINITY;
+            int validCount = 0;
+            double firstValid = Double.NaN;
+            double lastValid = Double.NaN;
             for (double[] row : values) {
-                sum += row[channel];
-                minimum = Math.min(minimum, row[channel]);
-                maximum = Math.max(maximum, row[channel]);
+                double value = row[channel];
+                if (excludeNonFinite && !Double.isFinite(value)) {
+                    continue;
+                }
+                sum += value;
+                minimum = Math.min(minimum, value);
+                maximum = Math.max(maximum, value);
+                if (validCount == 0) {
+                    firstValid = value;
+                }
+                lastValid = value;
+                validCount += 1;
             }
-            double mean = sum / frameCount;
+            if (validCount == 0) {
+                output[outputIndex++] = 0.0;
+                output[outputIndex++] = 0.0;
+                output[outputIndex++] = 0.0;
+                output[outputIndex++] = 0.0;
+                output[outputIndex++] = 0.0;
+                continue;
+            }
+            double mean = sum / validCount;
             double squared = 0.0;
             for (double[] row : values) {
-                double delta = row[channel] - mean;
+                double value = row[channel];
+                if (excludeNonFinite && !Double.isFinite(value)) {
+                    continue;
+                }
+                double delta = value - mean;
                 squared += delta * delta;
             }
             output[outputIndex++] = mean;
-            output[outputIndex++] = Math.sqrt(squared / frameCount);
+            output[outputIndex++] = Math.sqrt(squared / validCount);
             output[outputIndex++] = minimum;
             output[outputIndex++] = maximum;
-            output[outputIndex++] = values[frameCount - 1][channel] - values[0][channel];
+            output[outputIndex++] = lastValid - firstValid;
         }
         double[] accelerationMagnitude = magnitude(values, 2, 5);
         double[] accelerationJerk = jerk(values, 2, 5);
@@ -618,24 +797,41 @@ final class AispectStatsMlpRuntime {
         return sign * (1.0 - polynomial * Math.exp(-absolute * absolute));
     }
 
-    private static SequenceChannel[] channels(JSONArray values, String[] featureNames) throws JSONException {
-        if (values.length() != featureNames.length) {
-            throw new JSONException("invalid_sequence_channel_count");
-        }
-        SequenceChannel[] output = new SequenceChannel[values.length()];
-        for (int index = 0; index < values.length(); index++) {
-            JSONObject value = values.getJSONObject(index);
-            if (!featureNames[index].equals(value.getString("name"))) {
-                throw new JSONException("invalid_sequence_channel_order");
+    private static SequenceChannel[] channels(JSONArray values, String[] featureNames) {
+        try {
+            if (values.length() != featureNames.length) {
+                return null;
             }
-            output[index] = new SequenceChannel(
-                    value.getDouble("center"),
-                    nonZero(value.getDouble("scale")),
-                    value.optDouble("clipMin", -8.0),
-                    value.optDouble("clipMax", 8.0)
-            );
+            SequenceChannel[] output = new SequenceChannel[values.length()];
+            for (int index = 0; index < values.length(); index++) {
+                JSONObject value = values.getJSONObject(index);
+                if (!featureNames[index].equals(value.getString("name"))) {
+                    return null;
+                }
+                double center = value.getDouble("center");
+                double scale = value.getDouble("scale");
+                double clipMin = value.optDouble("clipMin", -8.0);
+                double clipMax = value.optDouble("clipMax", 8.0);
+                if (!Double.isFinite(center)
+                        || !Double.isFinite(scale)
+                        || !(scale > 0.0)
+                        || !Double.isFinite(clipMin)
+                        || !Double.isFinite(clipMax)
+                        || !(clipMin < clipMax)) {
+                    return null;
+                }
+                output[index] = new SequenceChannel(
+                        center,
+                        scale,
+                        clipMin,
+                        clipMax
+                );
+            }
+            return output;
+        } catch (JSONException error) {
+            // 中文注释：损坏的模型资产统一按不可加载处理，避免启动期异常穿透。
+            return null;
         }
-        return output;
     }
 
     private static Tensor tensor(JSONObject root, String name) throws JSONException {
@@ -653,12 +849,19 @@ final class AispectStatsMlpRuntime {
     }
 
     private static boolean hasExactWeightKeys(JSONObject weights) {
+        return hasExactKeys(weights, WEIGHT_KEYS);
+    }
+
+    private static boolean hasExactKeys(
+            JSONObject values,
+            Set<String> expected
+    ) {
         HashSet<String> actual = new HashSet<>();
-        Iterator<String> keys = weights.keys();
+        Iterator<String> keys = values.keys();
         while (keys.hasNext()) {
             actual.add(keys.next());
         }
-        return WEIGHT_KEYS.equals(actual);
+        return expected.equals(actual);
     }
 
     private static boolean matches(Tensor tensor, int... shape) {
@@ -708,12 +911,38 @@ final class AispectStatsMlpRuntime {
         return output;
     }
 
+    private static boolean matches(JSONArray actual, String[] expected)
+            throws JSONException {
+        return actual != null && Arrays.equals(stringArray(actual), expected);
+    }
+
     private static double[] numberArray(JSONArray values) throws JSONException {
         double[] output = new double[values.length()];
         for (int index = 0; index < output.length; index++) {
             output[index] = values.getDouble(index);
+            if (!Double.isFinite(output[index])) {
+                throw new JSONException("non_finite_number");
+            }
         }
         return output;
+    }
+
+    private static boolean allFinite(double[] values) {
+        for (double value : values) {
+            if (!Double.isFinite(value)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean allPositiveFinite(double[] values) {
+        for (double value : values) {
+            if (!Double.isFinite(value) || !(value > 0.0)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static final class SequenceChannel {

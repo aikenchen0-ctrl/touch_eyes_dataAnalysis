@@ -1,0 +1,259 @@
+{
+  "sourceFeatureContract": "causal_time_grid_imu11_touch7_mask5_v5",
+  "sourceFeatureNames": [
+    "x_norm",
+    "y_norm",
+    "userAcceleration.x",
+    "userAcceleration.y",
+    "userAcceleration.z",
+    "rotationRate.x",
+    "rotationRate.y",
+    "rotationRate.z",
+    "gravity.x",
+    "gravity.y",
+    "gravity.z",
+    "pressure",
+    "size",
+    "major_norm",
+    "minor_norm",
+    "log_axis_ratio",
+    "pointer_count",
+    "touch_valid",
+    "pressure_available",
+    "size_available",
+    "major_available",
+    "minor_available",
+    "pointer_count_available"
+  ],
+  "physicalFeatureNames": [
+    "x_norm",
+    "y_norm",
+    "userAcceleration.x",
+    "userAcceleration.y",
+    "userAcceleration.z",
+    "rotationRate.x",
+    "rotationRate.y",
+    "rotationRate.z",
+    "log_causal_size_ratio",
+    "log_axis_ratio"
+  ],
+  "baselineHistory": [
+    100.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0,
+    100.0
+  ],
+  "sourceMatrix": [
+    [
+      0.0, 0.5, 0.0, 0.2, -0.3, 0.0, -0.02, 0.03,
+      0.0, 0.0, 9.8, 0.4, 100.0, 0.2, 0.1,
+      0.6931471805599453, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0
+    ],
+    [
+      0.1, 0.51, 0.1, 0.2, -0.3, 0.01, -0.02, 0.03,
+      0.0, 0.0, 9.8, 0.4, 120.0, 0.21, 0.105,
+      0.6931471805599453, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0
+    ],
+    [
+      0.2, 0.52, 0.2, 0.2, -0.3, 0.02, -0.02, 0.03,
+      0.0, 0.0, 9.8, 0.4, 140.0, 0.22, 0.11,
+      0.6931471805599453, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0
+    ],
+    [
+      0.3, 0.53, 0.3, 0.2, -0.3, 0.03, -0.02, 0.03,
+      0.0, 0.0, 9.8, 0.4, 0.0, 0.23, 0.115,
+      0.6931471805599453, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0
+    ],
+    [
+      0.4, 0.54, 0.4, 0.2, -0.3, 0.04, -0.02, 0.03,
+      0.0, 0.0, 9.8, 0.4, 0.0, 0.24, 0.12,
+      0.6931471805599453, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0
+    ],
+    [
+      0.5, 0.55, 0.5, 0.2, -0.3, 0.05, -0.02, 0.03,
+      0.0, 0.0, 9.8, 0.4, 0.0, 0.25, 0.125,
+      0.6931471805599453, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0
+    ],
+    [
+      0.6, 0.56, 0.6, 0.2, -0.3, 0.06, -0.02, 0.03,
+      0.0, 0.0, 9.8, 0.4, 140.0, 0.26, 0.13,
+      0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0
+    ],
+    [
+      0.7, 0.57, 0.7, 0.2, -0.3, 0.07, -0.02, 0.03,
+      0.0, 0.0, 9.8, 0.4, 140.0, 0.27, 0.135,
+      0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0
+    ],
+    [
+      0.8, 0.58, 0.8, 0.2, -0.3, 0.08, -0.02, 0.03,
+      0.0, 0.0, 9.8, 0.4, 140.0, 0.28, 0.14,
+      0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0
+    ]
+  ],
+  "expectedProjection": [
+    [
+      0.0, 0.5, 0.0, 0.2, -0.3, 0.0, -0.02, 0.03,
+      0.0, 0.6931471805599453
+    ],
+    [
+      0.1, 0.51, 0.1, 0.2, -0.3, 0.01, -0.02, 0.03,
+      0.1823215567939546, 0.6931471805599453
+    ],
+    [
+      0.2, 0.52, 0.2, 0.2, -0.3, 0.02, -0.02, 0.03,
+      0.3364722366212129, 0.6931471805599453
+    ],
+    [
+      0.3, 0.53, 0.3, 0.2, -0.3, 0.03, -0.02, 0.03,
+      null, 0.6931471805599453
+    ],
+    [
+      0.4, 0.54, 0.4, 0.2, -0.3, 0.04, -0.02, 0.03,
+      null, 0.6931471805599453
+    ],
+    [
+      0.5, 0.55, 0.5, 0.2, -0.3, 0.05, -0.02, 0.03,
+      null, 0.6931471805599453
+    ],
+    [
+      0.6, 0.56, 0.6, 0.2, -0.3, 0.06, -0.02, 0.03,
+      0.3364722366212129, null
+    ],
+    [
+      0.7, 0.57, 0.7, 0.2, -0.3, 0.07, -0.02, 0.03,
+      0.3364722366212129, null
+    ],
+    [
+      0.8, 0.58, 0.8, 0.2, -0.3, 0.08, -0.02, 0.03,
+      0.3364722366212129, null
+    ]
+  ],
+  "expectedStats": [
+    0.4,
+    0.2581988897471611,
+    0.0,
+    0.8,
+    0.8,
+    0.54,
+    0.025819888974716116,
+    0.5,
+    0.58,
+    0.08,
+    0.4,
+    0.25819888974716115,
+    0.0,
+    0.8,
+    0.8,
+    0.2,
+    0.0,
+    0.2,
+    0.2,
+    0.0,
+    -0.3,
+    0.0,
+    -0.3,
+    -0.3,
+    0.0,
+    0.04,
+    0.025819888974716113,
+    0.0,
+    0.08,
+    0.08,
+    -0.02,
+    0.0,
+    -0.02,
+    -0.02,
+    0.0,
+    0.03,
+    0.0,
+    0.03,
+    0.03,
+    0.0,
+    0.2547017505464677,
+    0.12705479379037402,
+    0.0,
+    0.3364722366212129,
+    0.3364722366212129,
+    0.6931471805599453,
+    0.0,
+    0.6931471805599453,
+    0.6931471805599453,
+    0.0,
+    0.5706586791020716,
+    0.176111722018001,
+    0.8774964387392122,
+    0.1,
+    0.10000000000000009,
+    0.05706586791020715,
+    0.0176111722018001,
+    0.08774964387392122,
+    0.01,
+    0.010000000000000009
+  ],
+  "statsFeatureNames": [
+    "x_norm.mean",
+    "x_norm.std",
+    "x_norm.min",
+    "x_norm.max",
+    "x_norm.last_delta",
+    "y_norm.mean",
+    "y_norm.std",
+    "y_norm.min",
+    "y_norm.max",
+    "y_norm.last_delta",
+    "userAcceleration.x.mean",
+    "userAcceleration.x.std",
+    "userAcceleration.x.min",
+    "userAcceleration.x.max",
+    "userAcceleration.x.last_delta",
+    "userAcceleration.y.mean",
+    "userAcceleration.y.std",
+    "userAcceleration.y.min",
+    "userAcceleration.y.max",
+    "userAcceleration.y.last_delta",
+    "userAcceleration.z.mean",
+    "userAcceleration.z.std",
+    "userAcceleration.z.min",
+    "userAcceleration.z.max",
+    "userAcceleration.z.last_delta",
+    "rotationRate.x.mean",
+    "rotationRate.x.std",
+    "rotationRate.x.min",
+    "rotationRate.x.max",
+    "rotationRate.x.last_delta",
+    "rotationRate.y.mean",
+    "rotationRate.y.std",
+    "rotationRate.y.min",
+    "rotationRate.y.max",
+    "rotationRate.y.last_delta",
+    "rotationRate.z.mean",
+    "rotationRate.z.std",
+    "rotationRate.z.min",
+    "rotationRate.z.max",
+    "rotationRate.z.last_delta",
+    "log_causal_size_ratio.mean",
+    "log_causal_size_ratio.std",
+    "log_causal_size_ratio.min",
+    "log_causal_size_ratio.max",
+    "log_causal_size_ratio.last_delta",
+    "log_axis_ratio.mean",
+    "log_axis_ratio.std",
+    "log_axis_ratio.min",
+    "log_axis_ratio.max",
+    "log_axis_ratio.last_delta",
+    "userAcceleration.magnitude.mean",
+    "userAcceleration.magnitude.std",
+    "userAcceleration.magnitude.max",
+    "userAcceleration.jerk.mean",
+    "userAcceleration.jerk.max",
+    "rotationRate.magnitude.mean",
+    "rotationRate.magnitude.std",
+    "rotationRate.magnitude.max",
+    "rotationRate.jerk.mean",
+    "rotationRate.jerk.max"
+  ]
+}

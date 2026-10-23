@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 try:
@@ -45,8 +46,27 @@ def validate_tensor(name, record):
         expected_count *= dimension
     if len(values) != expected_count:
         raise RuntimeError("invalid_weight_value_count_" + name.replace(".", "_"))
-    if any(not isinstance(value, (int, float)) for value in values):
+    if any(
+        type(value) not in (int, float) or not math.isfinite(value)
+        for value in values
+    ):
         raise RuntimeError("invalid_weight_value_" + name.replace(".", "_"))
+
+
+def validate_contact_size_contract(model_contract):
+    """Require the causal contact-area proxy metadata used by the runtime."""
+    if model_contract.get("sizeSemantics") != contract.CONTACT_SIZE_SEMANTICS:
+        raise RuntimeError("invalid_size_semantics")
+    if model_contract.get("forceMeasurement") is not False:
+        raise RuntimeError("size_must_not_be_force_measurement")
+    if model_contract.get("missingValuePolicy") != (
+        contract.CONTACT_SIZE_PROXY_POLICY["missingValuePolicy"]
+    ):
+        raise RuntimeError("invalid_missing_value_policy")
+    if model_contract.get("sizeBaseline") != (
+        contract.CONTACT_SIZE_BASELINE_POLICY
+    ):
+        raise RuntimeError("invalid_size_baseline_policy")
 
 
 def export_model(source_dir, asset_dir, model_id):
@@ -66,10 +86,15 @@ def export_model(source_dir, asset_dir, model_id):
         raise RuntimeError("invalid_runtime_architecture")
     if model_contract.get("featureContract") != contract.FEATURE_CONTRACT:
         raise RuntimeError("invalid_feature_contract")
+    if runtime_architecture != contract.RUNTIME_ARCHITECTURE:
+        raise RuntimeError("invalid_causal_size_architecture")
     if model_contract.get("sourceFeatureContract") != contract.SOURCE_FEATURE_CONTRACT:
         raise RuntimeError("invalid_source_feature_contract")
-    if model_contract.get("sourceFeatureNames") != list(contract.SOURCE_FEATURE_NAMES):
+    if model_contract.get("sourceFeatureNames") != list(
+        contract.RUNTIME_SOURCE_FEATURE_NAMES
+    ):
         raise RuntimeError("invalid_source_feature_names")
+    validate_contact_size_contract(model_contract)
     if model_contract.get("featureNames") != list(contract.PHYSICAL_FEATURE_NAMES):
         raise RuntimeError("invalid_sequence_feature_names")
     if model_contract.get("sourceFeatureIndices") != list(contract.SOURCE_FEATURE_INDICES):
@@ -81,6 +106,16 @@ def export_model(source_dir, asset_dir, model_id):
         len(contract.PHYSICAL_FEATURE_NAMES),
     ]:
         raise RuntimeError("invalid_matrix_shape")
+    if model_contract.get("frameCount") != contract.FRAME_COUNT:
+        raise RuntimeError("invalid_frame_count")
+    if model_contract.get("sequenceChannelCount") != len(
+        contract.PHYSICAL_FEATURE_NAMES
+    ):
+        raise RuntimeError("invalid_sequence_channel_count")
+    if model_contract.get("statsFeatureCount") != contract.STATS_FEATURE_COUNT:
+        raise RuntimeError("invalid_stats_feature_count")
+    if model_contract.get("inputCount") != contract.STATS_FEATURE_COUNT:
+        raise RuntimeError("invalid_input_count")
     runtime_architecture = model_contract.get("runtimeArchitecture")
     expected_label_order = (
         contract.GATE_LABELS
@@ -124,6 +159,8 @@ def export_model(source_dir, asset_dir, model_id):
         raise RuntimeError("dropout_must_be_disabled_at_inference")
     if model_contract.get("deploymentAllowed") is not False:
         raise RuntimeError("experimental_model_cannot_be_deployment_allowed")
+    if model_contract.get("evaluationScope") != "all_data_fit_only":
+        raise RuntimeError("invalid_evaluation_scope")
     sequence_channels = model_contract.get("sequenceChannels")
     if not isinstance(sequence_channels, list) or len(sequence_channels) != len(
         contract.PHYSICAL_FEATURE_NAMES
@@ -133,16 +170,50 @@ def export_model(source_dir, asset_dir, model_id):
         channel = sequence_channels[index]
         if channel.get("name") != name:
             raise RuntimeError("invalid_sequence_channel_order")
-        if not isinstance(channel.get("center"), (int, float)):
+        center = channel.get("center")
+        scale = channel.get("scale")
+        clip_min = channel.get("clipMin")
+        clip_max = channel.get("clipMax")
+        if type(center) not in (int, float) or not math.isfinite(center):
             raise RuntimeError("invalid_sequence_channel_center")
-        if not isinstance(channel.get("scale"), (int, float)) or channel["scale"] == 0:
+        if (
+            type(scale) not in (int, float)
+            or not math.isfinite(scale)
+            or scale <= 0
+        ):
             raise RuntimeError("invalid_sequence_channel_scale")
+        if (
+            type(clip_min) not in (int, float)
+            or type(clip_max) not in (int, float)
+            or not math.isfinite(clip_min)
+            or not math.isfinite(clip_max)
+            or clip_min >= clip_max
+        ):
+            raise RuntimeError("invalid_sequence_channel_clip")
     stats_scaler = model_contract.get("statsScaler")
     if not isinstance(stats_scaler, dict):
         raise RuntimeError("missing_stats_scaler")
-    if len(stats_scaler.get("center", [])) != contract.STATS_FEATURE_COUNT:
+    stats_center = stats_scaler.get("center", [])
+    stats_scale = stats_scaler.get("scale", [])
+    if (
+        not isinstance(stats_center, list)
+        or len(stats_center) != contract.STATS_FEATURE_COUNT
+        or any(
+            type(value) not in (int, float) or not math.isfinite(value)
+            for value in stats_center
+        )
+    ):
         raise RuntimeError("invalid_stats_scaler_center")
-    if len(stats_scaler.get("scale", [])) != contract.STATS_FEATURE_COUNT:
+    if (
+        not isinstance(stats_scale, list)
+        or len(stats_scale) != contract.STATS_FEATURE_COUNT
+        or any(
+            type(value) not in (int, float)
+            or not math.isfinite(value)
+            or value <= 0
+            for value in stats_scale
+        )
+    ):
         raise RuntimeError("invalid_stats_scaler_scale")
     if stats_scaler.get("clipMin") != contract.STATS_CLIP_MIN:
         raise RuntimeError("invalid_stats_clip_min")

@@ -126,6 +126,136 @@ public final class AispectStatsMlpRuntimeTest {
     }
 
     @Test
+    public void causalSizeContractRequiresCompletedTouchHistoryScope() throws JSONException {
+        JSONObject valid = scaler(
+                AispectStatsMlpRuntime.V4_FEATURE_CONTRACT,
+                AispectStatsMlpRuntime.V4_SOURCE_FEATURE_NAMES
+        );
+        assertNotNull(AispectStatsMlpRuntime.load(
+                "causal_size_valid",
+                weights(),
+                valid
+        ));
+
+        JSONObject invalid = scaler(
+                AispectStatsMlpRuntime.V4_FEATURE_CONTRACT,
+                AispectStatsMlpRuntime.V4_SOURCE_FEATURE_NAMES
+        );
+        invalid.getJSONObject("sizeBaseline").remove("historyScope");
+        assertNull(AispectStatsMlpRuntime.load(
+                "causal_size_invalid",
+                weights(),
+                invalid
+        ));
+
+        JSONObject wrongScope = scaler(
+                AispectStatsMlpRuntime.V4_FEATURE_CONTRACT,
+                AispectStatsMlpRuntime.V4_SOURCE_FEATURE_NAMES
+        );
+        wrongScope.getJSONObject("sizeBaseline").put(
+                "deviceScope",
+                "session"
+        );
+        assertNull(AispectStatsMlpRuntime.load(
+                "causal_size_wrong_scope",
+                weights(),
+                wrongScope
+        ));
+    }
+
+    @Test
+    public void causalSizeStatsNamesExposeProxyAndAxisSemantics() {
+        String[] names = AispectStatsMlpRuntime.statsFeatureNames(
+                AispectStatsMlpRuntime.V4_FEATURE_NAMES
+        );
+
+        assertEquals(60, names.length);
+        assertEquals(
+                "log_causal_size_ratio.mean",
+                names[40]
+        );
+        assertEquals(
+                "log_axis_ratio.mean",
+                names[45]
+        );
+    }
+
+    @Test
+    public void causalSizeContractRejectsLegacyArchitecture() throws JSONException {
+        JSONObject invalid = scaler(
+                AispectStatsMlpRuntime.V4_FEATURE_CONTRACT,
+                AispectStatsMlpRuntime.V4_SOURCE_FEATURE_NAMES
+        ).put(
+                "runtimeArchitecture",
+                AispectStatsMlpRuntime.LEGACY_ARCHITECTURE
+        );
+
+        assertNull(AispectStatsMlpRuntime.load(
+                "invalid_v4_architecture",
+                weights(),
+                invalid
+        ));
+    }
+
+    @Test
+    public void causalSizeContractRejectsFrozenCountDrift() throws JSONException {
+        String[] fields = new String[]{
+                "frameCount",
+                "sequenceChannelCount",
+                "statsFeatureCount",
+                "inputCount"
+        };
+        for (String field : fields) {
+            JSONObject invalid = scaler(
+                    AispectStatsMlpRuntime.V4_FEATURE_CONTRACT,
+                    AispectStatsMlpRuntime.V4_SOURCE_FEATURE_NAMES
+            ).put(field, 1);
+            assertNull(
+                    field,
+                    AispectStatsMlpRuntime.load(
+                            "invalid_count_" + field,
+                            weights(),
+                            invalid
+                    )
+            );
+        }
+    }
+
+    @Test
+    public void causalSizeContractRejectsNonPositiveSequenceScale()
+            throws JSONException {
+        JSONObject invalid = scaler(
+                AispectStatsMlpRuntime.V4_FEATURE_CONTRACT,
+                AispectStatsMlpRuntime.V4_SOURCE_FEATURE_NAMES
+        );
+        invalid.getJSONArray("sequenceChannels")
+                .getJSONObject(8)
+                .put("scale", 0.0);
+
+        assertNull(AispectStatsMlpRuntime.load(
+                "invalid_v4_sequence_scale",
+                weights(),
+                invalid
+        ));
+    }
+
+    @Test
+    public void causalSizeContractRejectsMissingTouchStatistics()
+            throws JSONException {
+        JSONObject invalid = scaler(
+                AispectStatsMlpRuntime.V4_FEATURE_CONTRACT,
+                AispectStatsMlpRuntime.V4_SOURCE_FEATURE_NAMES
+        );
+        invalid.getJSONObject("sizeBaseline").remove("touchStatistics");
+
+        assertNull(AispectStatsMlpRuntime.load(
+                "invalid_v4_touch_statistics",
+                weights(),
+                invalid
+        ));
+    }
+
+    @Test
     public void statsFeaturesHaveFrozenCountAndPhysicalOrder() {
         double[][] values = new double[9][10];
         for (int frame = 0; frame < values.length; frame++) {
@@ -168,13 +298,19 @@ public final class AispectStatsMlpRuntimeTest {
             String featureContract,
             String[] sourceFeatureNameValues
     ) throws JSONException {
+        boolean causalSizeProxy = AispectStatsMlpRuntime.V4_FEATURE_CONTRACT.equals(
+                featureContract
+        );
+        String[] physicalFeatureNames = causalSizeProxy
+                ? AispectStatsMlpRuntime.V4_FEATURE_NAMES
+                : AispectStatsMlpRuntime.FEATURE_NAMES;
         JSONArray sourceNames = new JSONArray();
         for (String name : sourceFeatureNameValues) {
             sourceNames.put(name);
         }
         JSONArray featureNames = new JSONArray();
         JSONArray channels = new JSONArray();
-        for (String name : AispectStatsMlpRuntime.FEATURE_NAMES) {
+        for (String name : physicalFeatureNames) {
             featureNames.put(name);
             channels.put(new JSONObject()
                     .put("name", name)
@@ -188,13 +324,20 @@ public final class AispectStatsMlpRuntimeTest {
             sourceIndices.put(index);
         }
         JSONArray statsNames = new JSONArray();
-        for (String name : AispectStatsMlpRuntime.statsFeatureNames()) {
+        for (String name : AispectStatsMlpRuntime.statsFeatureNames(
+                physicalFeatureNames
+        )) {
             statsNames.put(name);
         }
-        return new JSONObject()
+        JSONObject result = new JSONObject()
                 .put("runtimeArchitecture", AispectStatsMlpRuntime.ARCHITECTURE)
                 .put("featureContract", featureContract)
-                .put("sourceFeatureContract", AispectStatsMlpRuntime.SOURCE_FEATURE_CONTRACT)
+                .put(
+                        "sourceFeatureContract",
+                        causalSizeProxy
+                                ? AispectStatsMlpRuntime.V4_SOURCE_FEATURE_CONTRACT
+                                : AispectStatsMlpRuntime.SOURCE_FEATURE_CONTRACT
+                )
                 .put("sourceFeatureNames", sourceNames)
                 .put("featureNames", featureNames)
                 .put("sourceFeatureIndices", sourceIndices)
@@ -233,6 +376,57 @@ public final class AispectStatsMlpRuntimeTest {
                         .put("scale", ones(60))
                         .put("clipMin", -8.0)
                         .put("clipMax", 8.0));
+        if (causalSizeProxy) {
+            result
+                    .put("sizeSemantics", "contact_area_proxy")
+                    .put("forceMeasurement", false)
+                    .put("missingValuePolicy", "nan_excluded_from_stats")
+                    .put(
+                            "sizeBaseline",
+                            new JSONObject()
+                                    .put("causal", true)
+                                    .put("currentTouchExcluded", true)
+                                    .put(
+                                            "historyScope",
+                                            "completed_touches_only"
+                                    )
+                                    .put(
+                                            "deviceScope",
+                                            "physical_device"
+                                    )
+                                    .put(
+                                            "normalization",
+                                            "log_causal_device_median"
+                                    )
+                                    .put("aggregation", "median")
+                                    .put(
+                                            "withinTouchAggregation",
+                                            "median"
+                                    )
+                                    .put(
+                                            "minimumTouches",
+                                            AispectCausalSizeBaseline.MINIMUM_TOUCHES
+                                    )
+                                    .put(
+                                            "maximumTouches",
+                                            AispectCausalSizeBaseline.MAXIMUM_TOUCHES
+                                    )
+                                    .put(
+                                            "logRatioClip",
+                                            AispectCausalSizeBaseline.LOG_RATIO_CLIP
+                                    )
+                                    .put(
+                                            "touchStatistics",
+                                            new JSONArray()
+                                                    .put("mean")
+                                                    .put("std")
+                                                    .put("min")
+                                                    .put("max")
+                                                    .put("last_delta")
+                                    )
+                    );
+        }
+        return result;
     }
 
     private static JSONObject weights() throws JSONException {

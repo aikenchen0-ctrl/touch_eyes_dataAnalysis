@@ -158,10 +158,44 @@ PHYSICAL_FEATURE_NAMES = (
     "rotationRate.x",
     "rotationRate.y",
     "rotationRate.z",
-    "size",
+    "log_causal_size_ratio",
     "log_axis_ratio",
 )
 SOURCE_FEATURE_INDICES = (0, 1, 2, 3, 4, 5, 6, 7, 12, 15)
+CONTACT_SIZE_SEMANTICS = "contact_area_proxy"
+CAUSAL_SIZE_MINIMUM_TOUCHES = 8
+CAUSAL_SIZE_MAXIMUM_TOUCHES = 64
+CAUSAL_SIZE_LOG_RATIO_CLIP = 4.0
+CONTACT_SIZE_PROXY_POLICY = {
+    "semantics": CONTACT_SIZE_SEMANTICS,
+    "forceMeasurement": False,
+    "normalization": "log_causal_device_median",
+    "historyScope": "completed_touches_only",
+    "aggregation": "within_touch_median_then_cross_touch_median",
+    "minimumTouches": CAUSAL_SIZE_MINIMUM_TOUCHES,
+    "maximumTouches": CAUSAL_SIZE_MAXIMUM_TOUCHES,
+    "logRatioClip": CAUSAL_SIZE_LOG_RATIO_CLIP,
+    "missingValuePolicy": "nan_excluded_from_stats",
+}
+CONTACT_SIZE_BASELINE_POLICY = {
+    "causal": True,
+    "currentTouchExcluded": True,
+    "deviceScope": "physical_device",
+    "historyScope": "completed_touches_only",
+    "normalization": "log_causal_device_median",
+    "aggregation": "median",
+    "withinTouchAggregation": "median",
+    "minimumTouches": CAUSAL_SIZE_MINIMUM_TOUCHES,
+    "maximumTouches": CAUSAL_SIZE_MAXIMUM_TOUCHES,
+    "logRatioClip": CAUSAL_SIZE_LOG_RATIO_CLIP,
+    "touchStatistics": [
+        "mean",
+        "std",
+        "min",
+        "max",
+        "last_delta",
+    ],
+}
 LEGACY_V2_FEATURE_CONTRACT = (
     "causal_time_grid_imu11_touch7_mask5_stats_mlp_v2"
 )
@@ -218,8 +252,33 @@ SOURCE_FEATURE_NAMES = (
     "minor_available",
     "pointer_count_available",
 )
-FEATURE_CONTRACT = "causal_time_grid_imu11_touch7_mask5_stats_mlp_v3"
-SOURCE_FEATURE_CONTRACT = "causal_time_grid_imu11_touch7_mask5_v5"
+# 中文注释：源矩阵仍保存原始 size；运行时合同只暴露因果相对尺度，
+# 避免把设备相关的触摸半径误当成压力或真实力度。
+RUNTIME_SOURCE_FEATURE_NAMES = (
+    *SOURCE_FEATURE_NAMES[:12],
+    "log_causal_size_ratio",
+    *SOURCE_FEATURE_NAMES[13:],
+)
+LEGACY_V3_FEATURE_CONTRACT = (
+    "causal_time_grid_imu11_touch7_mask5_stats_mlp_v3"
+)
+LEGACY_V3_SOURCE_FEATURE_CONTRACT = (
+    "causal_time_grid_imu11_touch7_mask5_v5"
+)
+LEGACY_V3_PHYSICAL_FEATURE_NAMES = (
+    "x_norm",
+    "y_norm",
+    "userAcceleration.x",
+    "userAcceleration.y",
+    "userAcceleration.z",
+    "rotationRate.x",
+    "rotationRate.y",
+    "rotationRate.z",
+    "size",
+    "log_axis_ratio",
+)
+FEATURE_CONTRACT = "causal_time_grid_imu11_touch7_mask5_stats_mlp_v4"
+SOURCE_FEATURE_CONTRACT = "causal_time_grid_imu11_touch7_mask5_v6"
 LEGACY_RUNTIME_ARCHITECTURE = "stats_mlp_v1"
 RUNTIME_ARCHITECTURE = "stats_mlp_strength_gate_v1"
 FRAME_COUNT = 9

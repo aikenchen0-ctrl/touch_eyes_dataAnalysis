@@ -171,6 +171,7 @@ public final class AispectCollectionController {
         deviceId = storedDeviceId;
         dataLogger = new AispectDataLogger(context);
         classifier = new AispectImpactCNNClassifier(context);
+        classifier.setDeviceIdentity(deviceId);
         AispectImpactCNNClassifier.ModelInfo defaultModel = classifier.defaultModelInfo();
         if (defaultModel != null) {
             selectedModelId = defaultModel.id;
@@ -363,6 +364,7 @@ public final class AispectCollectionController {
             downWindowGate.reset();
             ensureCollectionSession();
             activeCollectorIdentity = new AispectModels.CollectorIdentity(selectedUserName, deviceId);
+            classifier.setDeviceIdentity(deviceId);
             normalizationEngine.resetBaseline();
             signalCollector.start();
             lastEventKey = "collector_session_ready";
@@ -695,6 +697,11 @@ public final class AispectCollectionController {
         }
         activeTouch = false;
         cancelDownWindowPoll();
+        // 中文注释：只有完整窗口通过抬起余量门后才进入设备尺寸历史；
+        // 诊断样本和成功保存样本都观察，但当前触摸的预测早已完成。
+        classifier.observeCompletedCausalSizeTouch(
+                new ArrayList<>(activeTouchFrames)
+        );
         AispectDeviceCapabilityProfiler.Snapshot capability = capabilityProfiler.snapshot();
         AispectContactPatch patch = AispectContactPatch.fromFrames(new ArrayList<>(activeTouchFrames));
         latestNormalizationProfile = normalizationEngine.evaluate(new ArrayList<>(activeTouchFrames), patch);

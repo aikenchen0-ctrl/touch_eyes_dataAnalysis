@@ -16,6 +16,7 @@ public final class AispectCausalPressFeatureBuilder {
     private static final String CONTRACT_TIME_GRID_STATS_MLP_V1 = "causal_time_grid_imu11_touch7_mask5_stats_mlp_v1";
     private static final String CONTRACT_TIME_GRID_STATS_MLP = "causal_time_grid_imu11_touch7_mask5_stats_mlp_v2";
     private static final String CONTRACT_TIME_GRID_STATS_MLP_V3 = "causal_time_grid_imu11_touch7_mask5_stats_mlp_v3";
+    private static final String CONTRACT_TIME_GRID_STATS_MLP_V4 = "causal_time_grid_imu11_touch7_mask5_stats_mlp_v4";
     private static final String CONTRACT_TIME_GRID_TOUCH7_MASK5_NO_GRAVITY = "causal_time_grid_touch7_mask5_no_gravity_v1";
     private static final String CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_DELTA_GRAVITY = "causal_time_grid_imu11_touch7_mask5_delta_gravity_v1";
     private static final long[] TIME_GRID_OFFSETS_NANOS = new long[]{
@@ -155,6 +156,18 @@ public final class AispectCausalPressFeatureBuilder {
             "size",
             "log_axis_ratio"
     };
+    private static final String[] STATS_MLP_V4_PHYSICAL_FEATURE_NAMES = new String[]{
+            "x_norm",
+            "y_norm",
+            "userAcceleration.x",
+            "userAcceleration.y",
+            "userAcceleration.z",
+            "rotationRate.x",
+            "rotationRate.y",
+            "rotationRate.z",
+            "log_causal_size_ratio",
+            "log_axis_ratio"
+    };
     private static final String[] LEGACY_STATS_MLP_SOURCE_FEATURE_NAMES = IMU11_TOUCH7_MASK5_FEATURE_NAMES;
     private static final String[] V2_STATS_MLP_SOURCE_FEATURE_NAMES = IMU11_TOUCH9_MASK6_V4_FEATURE_NAMES;
     private static final String[] STATS_MLP_SOURCE_FEATURE_NAMES = IMU11_TOUCH7_MASK5_V5_FEATURE_NAMES;
@@ -221,6 +234,7 @@ public final class AispectCausalPressFeatureBuilder {
                 || CONTRACT_TIME_GRID_STATS_MLP_V1.equals(featureContract)
                 || CONTRACT_TIME_GRID_STATS_MLP.equals(featureContract)
                 || CONTRACT_TIME_GRID_STATS_MLP_V3.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP_V4.equals(featureContract)
                 || CONTRACT_TIME_GRID_TOUCH7_MASK5_NO_GRAVITY.equals(featureContract)
                 || CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_DELTA_GRAVITY.equals(featureContract);
     }
@@ -234,6 +248,7 @@ public final class AispectCausalPressFeatureBuilder {
                 || CONTRACT_TIME_GRID_STATS_MLP_V1.equals(featureContract)
                 || CONTRACT_TIME_GRID_STATS_MLP.equals(featureContract)
                 || CONTRACT_TIME_GRID_STATS_MLP_V3.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP_V4.equals(featureContract)
                 || CONTRACT_TIME_GRID_TOUCH7_MASK5_NO_GRAVITY.equals(featureContract)
                 || CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_DELTA_GRAVITY.equals(featureContract);
     }
@@ -304,6 +319,9 @@ public final class AispectCausalPressFeatureBuilder {
         }
         if (CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_V5.equals(featureContract)) {
             return IMU11_TOUCH7_MASK5_V5_FEATURE_NAMES.clone();
+        }
+        if (CONTRACT_TIME_GRID_STATS_MLP_V4.equals(featureContract)) {
+            return STATS_MLP_V4_PHYSICAL_FEATURE_NAMES.clone();
         }
         if (CONTRACT_TIME_GRID_STATS_MLP_V1.equals(featureContract)
                 || CONTRACT_TIME_GRID_STATS_MLP.equals(featureContract)
@@ -380,10 +398,28 @@ public final class AispectCausalPressFeatureBuilder {
             long downEventElapsedRealtimeNanos,
             String featureContract
     ) {
+        return buildTimeGrid(
+                frames,
+                touchFrames,
+                downEventElapsedRealtimeNanos,
+                featureContract,
+                null
+        );
+    }
+
+    public static double[][] buildTimeGrid(
+            AispectModels.ImpactFrame[] frames,
+            List<AispectTouchFrame> touchFrames,
+            long downEventElapsedRealtimeNanos,
+            String featureContract,
+            AispectCausalSizeBaseline sizeBaseline
+    ) {
         if (!isTimeGridFeatureContract(featureContract)
                 || frames == null
                 || touchFrames == null
-                || downEventElapsedRealtimeNanos <= 0L) {
+                || downEventElapsedRealtimeNanos <= 0L
+                || CONTRACT_TIME_GRID_STATS_MLP_V4.equals(featureContract)
+                && sizeBaseline == null) {
             return null;
         }
         ArrayList<AispectModels.ImpactFrame> ordered = new ArrayList<>();
@@ -424,6 +460,7 @@ public final class AispectCausalPressFeatureBuilder {
                 || CONTRACT_TIME_GRID_STATS_MLP.equals(featureContract);
         boolean useV5Source = CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_V5.equals(featureContract)
                 || CONTRACT_TIME_GRID_STATS_MLP_V3.equals(featureContract);
+        boolean useV6Source = CONTRACT_TIME_GRID_STATS_MLP_V4.equals(featureContract);
         boolean includeTouchDetails = CONTRACT_TIME_GRID_IMU11_TOUCH9.equals(featureContract);
         boolean includeTouchMasks = isTouchMaskTimeGridContract(featureContract);
         boolean includeTouch9Masks = useV4Source;
@@ -432,7 +469,7 @@ public final class AispectCausalPressFeatureBuilder {
                 : (includeTouchMasks ? 23 : (includeTouchDetails ? 20 : 11));
         double[][] output = new double[TIME_GRID_OFFSETS_NANOS.length][featureCount];
         long batchAvailabilityReceipt = 0L;
-        if (useV5Source) {
+        if (useV5Source || useV6Source) {
             for (long offset : TIME_GRID_OFFSETS_NANOS) {
                 FrameBracket bracket = frameBracket(
                         ordered,
@@ -460,7 +497,7 @@ public final class AispectCausalPressFeatureBuilder {
             if (bracket.left != bracket.right && (gap <= 0L || gap > maxGap)) {
                 return null;
             }
-            long availabilityReceipt = useV5Source
+            long availabilityReceipt = useV5Source || useV6Source
                     ? batchAvailabilityReceipt
                     : Math.max(
                             bracket.left.receivedElapsedRealtimeNanos,
@@ -479,10 +516,14 @@ public final class AispectCausalPressFeatureBuilder {
                     true,
                     includeTouchMasks,
                     includeTouch9Masks,
-                    useV4Source || useV5Source
+                    useV4Source || useV5Source || useV6Source
             );
         }
-        return transformPoseInvariantTimeGrid(output, featureContract);
+        return transformPoseInvariantTimeGrid(
+                output,
+                featureContract,
+                sizeBaseline
+        );
     }
 
     private static boolean isTouchMaskTimeGridContract(String featureContract) {
@@ -492,11 +533,19 @@ public final class AispectCausalPressFeatureBuilder {
                 || CONTRACT_TIME_GRID_STATS_MLP_V1.equals(featureContract)
                 || CONTRACT_TIME_GRID_STATS_MLP.equals(featureContract)
                 || CONTRACT_TIME_GRID_STATS_MLP_V3.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP_V4.equals(featureContract)
                 || CONTRACT_TIME_GRID_TOUCH7_MASK5_NO_GRAVITY.equals(featureContract)
                 || CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_DELTA_GRAVITY.equals(featureContract);
     }
 
-    private static double[][] transformPoseInvariantTimeGrid(double[][] source, String featureContract) {
+    private static double[][] transformPoseInvariantTimeGrid(
+            double[][] source,
+            String featureContract,
+            AispectCausalSizeBaseline sizeBaseline
+    ) {
+        if (CONTRACT_TIME_GRID_STATS_MLP_V4.equals(featureContract)) {
+            return projectStatsMlpV4Source(source, sizeBaseline);
+        }
         if (CONTRACT_TIME_GRID_STATS_MLP_V1.equals(featureContract)
                 || CONTRACT_TIME_GRID_STATS_MLP.equals(featureContract)
                 || CONTRACT_TIME_GRID_STATS_MLP_V3.equals(featureContract)) {
@@ -549,6 +598,21 @@ public final class AispectCausalPressFeatureBuilder {
         }
         return source;
     }
+
+    static double[][] projectStatsMlpV4Source(
+            double[][] source,
+            AispectCausalSizeBaseline sizeBaseline
+    ) {
+        if (sizeBaseline == null) {
+            return null;
+        }
+        return AispectCausalSizeFeatureProjector.project(
+                source,
+                STATS_MLP_SOURCE_FEATURE_NAMES,
+                sizeBaseline.currentMedian()
+        );
+    }
+
 
     private static AispectTouchFrame latestTouchFrame(
             List<AispectTouchFrame> touchFrames,

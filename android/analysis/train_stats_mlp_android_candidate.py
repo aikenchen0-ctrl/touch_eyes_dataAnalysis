@@ -10,10 +10,12 @@ import numpy as np
 import torch
 
 try:
+    from . import contact_size_proxy
     from . import gate_threshold_metrics
     from . import run_lightweight_time_grid_models as lightweight
     from . import stats_mlp_contract as contract
 except ImportError:
+    import contact_size_proxy
     import gate_threshold_metrics
     import run_lightweight_time_grid_models as lightweight
     import stats_mlp_contract as contract
@@ -40,21 +42,51 @@ def configure_determinism(seed):
     torch.set_num_threads(1)
 
 
+def source_matrix(row):
+    """Validate the persisted v5 matrix before deriving the v6 runtime view."""
+    if row.get("featureContract") != contract.LEGACY_V3_SOURCE_FEATURE_CONTRACT:
+        raise RuntimeError("invalid_source_feature_contract")
+    if row.get("featureNames") != list(contract.SOURCE_FEATURE_NAMES):
+        raise RuntimeError("invalid_source_feature_names")
+    matrix = np.asarray(row.get("matrix"), dtype=np.float64)
+    if matrix.shape != (
+        contract.FRAME_COUNT,
+        len(contract.SOURCE_FEATURE_NAMES),
+    ):
+        raise RuntimeError("invalid_source_matrix")
+    return matrix
+
+
+def prepare_causal_source_matrices(rows):
+    """Build v6 physical matrices through the shared causal transform."""
+    for row in rows:
+        source_matrix(row)
+    return contact_size_proxy.transform_rows(rows)
+
+
+def finite_fit_values(values):
+    """Select finite samples for training-only scalers."""
+    flat = np.asarray(values, dtype=np.float64).reshape(-1)
+    return flat[np.isfinite(flat)]
+
+
 def prepare_all_data(rows):
     """Fit scalers on the complete candidate set and preserve their values."""
-    # 中文注释：训练数据行保留 JSON 结构，公共矩阵函数只接受样本字典，
-    # 因此先显式转换矩阵，避免把字符串索引误传给 NumPy。
-    samples = [
-        {"matrix": np.asarray(row["matrix"], dtype=np.float32)}
-        for row in rows
-    ]
-    raw = lightweight.select_matrix(samples, lightweight.PHYSICAL_INDICES)
-    center, scale = lightweight.fit_scaler(raw)
-    normalized = lightweight.transform(raw, center, scale)
-    stats = lightweight.stats_features(normalized)
-    stats_center = stats.mean(axis=0)
-    stats_scale = stats.std(axis=0)
-    stats_scale[stats_scale < 1e-6] = 1.0
+    raw = prepare_causal_source_matrices(rows)
+    center, scale = contact_size_proxy.fit_robust_scaler(raw)
+    normalized = contact_size_proxy.transform(raw, center, scale)
+    stats = contact_size_proxy.stats_features(normalized)
+    stats_center = []
+    stats_scale = []
+    for channel in range(stats.shape[1]):
+        selected = finite_fit_values(stats[:, channel])
+        if selected.size == 0:
+            raise RuntimeError("empty_stats_scaler_channel")
+        stats_center.append(float(selected.mean()))
+        value = float(selected.std())
+        stats_scale.append(value if value >= 1e-6 else 1.0)
+    stats_center = np.asarray(stats_center, dtype=np.float32)
+    stats_scale = np.asarray(stats_scale, dtype=np.float32)
     normalized_stats = np.clip(
         (stats - stats_center) / stats_scale,
         contract.STATS_CLIP_MIN,
@@ -397,7 +429,15 @@ def main():
         "runtimeArchitecture": contract.RUNTIME_ARCHITECTURE,
         "featureContract": contract.FEATURE_CONTRACT,
         "sourceFeatureContract": contract.SOURCE_FEATURE_CONTRACT,
-        "sourceFeatureNames": list(contract.SOURCE_FEATURE_NAMES),
+        "sizeSemantics": contract.CONTACT_SIZE_SEMANTICS,
+        "forceMeasurement": False,
+        "missingValuePolicy": contract.CONTACT_SIZE_PROXY_POLICY[
+            "missingValuePolicy"
+        ],
+        "sizeBaseline": dict(contract.CONTACT_SIZE_BASELINE_POLICY),
+        "sourceFeatureNames": list(
+            contract.RUNTIME_SOURCE_FEATURE_NAMES
+        ),
         "featureNames": list(contract.PHYSICAL_FEATURE_NAMES),
         "sourceFeatureIndices": list(contract.SOURCE_FEATURE_INDICES),
         "statsFeatureNames": list(contract.STATS_FEATURE_NAMES),

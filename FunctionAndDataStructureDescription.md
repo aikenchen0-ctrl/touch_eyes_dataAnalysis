@@ -500,7 +500,8 @@
 ## touch26 普通点击误触审计
 
 - `AispectCollectionContext.negative()` 固化普通点击任务、握持、支撑与 `targetPerCell`；`AispectCollectionPlan.negativeLabel()` 返回独立的普通点击标签，不推进四类 schedule。
-- `CollectionTaskControls` 提供显式模式切换、独立进度与独立配额。普通点击达到配额后自动退出审计模式，不占用四类交错进度。
+- `AispectCollectionPlan` 持有 `INTERLEAVED` 与 `NEGATIVE_AUDIT` 模式状态，并通过 `advanceAfterSave()` 返回样本落盘后的核心推进结果。普通点击达到配额时切回四类模式并重建交错 schedule；四类模式只推进或完成，不因普通点击计数退出。
+- `CollectionTaskControls` 只执行核心推进结果。普通点击最后一条成功落盘后，先调用 `controller.setSelectedLabel()` 恢复四类标签，再停止采集并刷新界面；复核使计数恢复后再次进入审计，重新满额仍会退出。
 - 四类交错轮换只在任务、握持、支撑、协议或 schedule 变化时重建 session；同一 session 内的手指与力度标签轮换继续沿用原 session，避免把正常交错误拆成单标签 session。
 - 普通点击与四类正样本使用不同协议，因此切换审计模式会建立独立 session。普通点击只写入 `ordinary_touch26.jsonl`，并保留 `classLabel`、`collectionProtocol`、`strengthTruthSource`、`taskId`、`bodyPosture`、`requestedDevicePose`、`grip`、`support` 与 `labelStatus`，用于固定误触率评估。
 - `build_time_grid_training_dataset.py` 把 `ordinary_touch` 标记为 `ordinary_touch_negative_sample` 并排除出 `training_touch26.jsonl` 与严格训练折；该隔离只影响拒识审计，不能把普通点击作为轻重监督真值。
@@ -518,6 +519,7 @@
 - 2026-10-22：新增实验脚本及六项纯函数测试，覆盖触摸内相对变化、缺失值、因果热身不读取后续触摸、仅保留形状合同、长轴可用性双门控和 session 分组身份探针。实验尚未通过严格嵌套门槛前，不修改 Android 特征合同、模型权重或默认模型。
 - 2026-10-23：新增普通点击独立审计协议、采集界面模式切换和数据清洗隔离；Python 合同测试 21 项通过，Android `aispect-core` 采集计划与任务测试通过。普通点击暂不进入四类训练，待补齐跨设备、跨姿势困难负样本后再评估固定 FPR 下的召回。
 - 2026-10-23：严格嵌套验证接入普通点击冻结阈值审计，强制来源去重和训练/外测重叠拒绝，并输出设备、姿势、运动状态分组误接受率；普通点击不参与拟合或阈值选择，指定 Python 回归测试 48 项通过。
+- 2026-10-24：修复普通点击审计满额后未退出模式的问题；模式推进收敛到 `AispectCollectionPlan.advanceAfterSave()`，最后一条落盘后恢复四类交错标签，并覆盖重复进入审计、四类满额不误退出和四类正常推进的 JUnit。
 
 ## touch26 v5 因果源合同与 Stats MLP v3
 
@@ -528,3 +530,15 @@
 - 本轮新增测试覆盖 23 列合同、无方向字段、Stats MLP v3 的十列物理视图、整批可用时刻与逐槽时刻差异、迟到触摸不得进入输入、事件时间晚于目标槽的触摸不得进入输入，以及错误源合同拒绝加载。Python 全量分析测试 387 项通过；Android `aispect-core` Debug 与 Release JVM 测试各 80 项通过。
 - 当前报告 `gate-le2110-fpr-limit-sweep-20261024` 的目标误触率为 1% 时，最佳候选在设备留出折上的重触召回约 16.50%，最差姿势组约 9.33%，最差分组误接受率约 2.80%。这不能达到 90% 召回目标，也不能宣称生产误触率低于 1%。报告仍缺少交错正负样本、跨设备充分覆盖和三个独立种子的证明，模型只能保持研究候选。
 - 本轮提交建立可复现的 v5 源合同和端侧运行时校验，尚未用 v5 重建全部派生数据、重新训练跨设备模型或完成五设备三 seed 严格评估，因此不包含准确率提升声明。
+
+## touch23 v6 因果接触尺寸代理与 Stats MLP v4
+
+- `size` 的语义固定为触摸接触面积代理量，不能解释为压力、力度或真实牛顿力。不同设备的半径、长轴和面积量纲不可直接比较，因此 v6 只把设备内相对变化送入统计模型，绝对 `size` 仍保留在源矩阵中用于审计和重新派生。
+- v6 的源合同为 `causal_time_grid_imu11_touch7_mask5_v6`，运行时合同为 `causal_time_grid_imu11_touch7_mask5_stats_mlp_v4`。源矩阵仍为九帧乘二十三列；运行时把第十个物理通道从原始 `size` 替换为 `log_causal_size_ratio`，其余物理通道顺序不变。
+- 设备内基线严格因果：每台物理设备先按自然源文件顺序处理已完成触摸，每帧只使用有效且大于零的 `size`；每次触摸先取触摸内中位数，再对最近最多 64 次已完成触摸的中位数取中位数。至少累计 8 次有效触摸后才启用基线，当前触摸和未来触摸都不能进入分母。
+- 设备键优先使用 `platform:collectorDeviceId`，缺少采集器设备标识时回退到 `platform:deviceName`，避免同型号不同采集机共享尺度历史。缺失 `size`、非有限值、非正值和可用性掩码无效时，不污染历史，也不阻断位置、IMU 等其他通道统计。
+- `log_causal_size_ratio = log(size / deviceHistoryMedian)` 截断到 `[-4, 4]`；长短轴只使用绝对对数比 `abs(log(major / minor))`，并同时要求长轴、短轴和对应可用性掩码有效。九个时间帧对这两个通道分别计算 `mean`、`std`、`min`、`max` 和 `last_delta`，因此可以表达触摸内变化、峰值和首尾差。
+- Stats MLP v4 的导出合同同时锁定 `sizeSemantics=contact_area_proxy`、`forceMeasurement=false`、`missingValuePolicy=nan_excluded_from_stats`、设备级历史作用域、当前触摸排除、8 至 64 次窗口和触摸内中位数聚合。Python 训练器、导出器和 Android 加载器分别校验这些字段，禁止把 v4 权重误配到旧 v3 源合同或旧运行时架构。
+- v1、v2、v3 合同继续保留加载兼容；新模型只能通过 v4 合同和 v6 源合同进入因果尺寸代理路径。v3 的原始 `size` 路径继续可用于历史模型复现，不能与新路径混用。
+- 本轮新增测试覆盖 Python 与 Android 共享黄金样例、设备尺度不变性、同型号采集机隔离、八次触摸预热、重复或无效触摸不推进历史、缺失尺寸不阻断其他统计、长短轴对称，以及导出和加载器的冻结计数、有限值、缩放和合同字段校验。测试通过只证明合同一致，不证明模型已达到准确率目标。
+- 当前报告仍以 `gate-le2110-fpr-limit-sweep-20261024` 为证据：目标误触率为 1% 时，候选在设备留出折上的重触召回约 16.50%，最差姿势组约 9.33%，最差分组误接受率约 2.80%；普通点击负样本仍为零。v6 尚未重新训练全部跨设备模型，也没有完成五设备三 seed 严格评估，因此不能宣称 90% 召回、低于 1% 生产误触或本次已提升准确率。

@@ -222,11 +222,24 @@ public final class AispectCrossDeviceTimeGridFeatureBuilderTest {
                 1_000_000_000L,
                 "causal_time_grid_imu11_touch7_mask5_v5"
         );
+        double[][] v6 = AispectCausalPressFeatureBuilder.buildTimeGrid(
+                frames,
+                touches,
+                1_000_000_000L,
+                "causal_time_grid_imu11_touch7_mask5_stats_mlp_v4",
+                new AispectCausalSizeBaseline(
+                        "test-device",
+                        java.util.Collections.emptyList()
+                )
+        );
 
         assertNotNull(v4);
         assertNotNull(v5);
+        assertNotNull(v6);
         assertEquals(0.0, v4[0][0], 1e-6);
         assertEquals(0.2, v5[0][0], 1e-6);
+        assertEquals(0.2, v6[0][0], 1e-6);
+        assertEquals(10, v6[0].length);
     }
 
     @Test
@@ -262,11 +275,35 @@ public final class AispectCrossDeviceTimeGridFeatureBuilderTest {
                 1_000_000_000L,
                 "causal_time_grid_imu11_touch7_mask5_v5"
         );
+        double[][] lateV6 = AispectCausalPressFeatureBuilder.buildTimeGrid(
+                frames,
+                lateReceipt,
+                1_000_000_000L,
+                "causal_time_grid_imu11_touch7_mask5_stats_mlp_v4",
+                new AispectCausalSizeBaseline(
+                        "test-device",
+                        java.util.Collections.emptyList()
+                )
+        );
+        double[][] futureV6 = AispectCausalPressFeatureBuilder.buildTimeGrid(
+                frames,
+                futureEvent,
+                1_000_000_000L,
+                "causal_time_grid_imu11_touch7_mask5_stats_mlp_v4",
+                new AispectCausalSizeBaseline(
+                        "test-device",
+                        java.util.Collections.emptyList()
+                )
+        );
 
         assertNotNull(late);
         assertNotNull(future);
+        assertNotNull(lateV6);
+        assertNotNull(futureV6);
         assertEquals(0.0, late[0][0], 1e-6);
         assertEquals(0.0, future[0][0], 1e-6);
+        assertEquals(0.0, lateV6[0][0], 1e-6);
+        assertEquals(0.0, futureV6[0][0], 1e-6);
     }
 
     @Test
