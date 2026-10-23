@@ -11,6 +11,7 @@ from pathlib import Path
 KEEP_DIR = "high_quality"
 REVIEW_DIR = "review"
 REJECT_DIR = "rejected"
+ORDINARY_CLASS_LABEL = "ordinary_touch"
 
 
 def main():
@@ -40,14 +41,37 @@ def main():
             record["quality_score"] = 0
             record["quality_reasons"] = "json_load_failed"
 
-    selected_records = [record for record in records if record.get("quality_bucket") == KEEP_DIR]
+    selected_records = [
+        record
+        for record in records
+        if (
+            record.get("quality_bucket") == KEEP_DIR
+            and record.get("label_id") != ORDINARY_CLASS_LABEL
+        )
+    ]
+    ordinary_records = [
+        record
+        for record in records
+        if record.get("label_id") == ORDINARY_CLASS_LABEL
+    ]
     weighted_records = select_weighted_records(records)
     balanced_records = balance_records(selected_records, args.max_per_class)
     write_manifest(output_dir / "manifest.csv", records)
     write_manifest(output_dir / "train_manifest.csv", selected_records)
     write_manifest(output_dir / "weighted_train_manifest.csv", weighted_records)
     write_manifest(output_dir / "balanced_train_manifest.csv", balanced_records)
-    write_summary(output_dir / "summary.json", records, selected_records, weighted_records, balanced_records)
+    write_manifest(
+        output_dir / "ordinary_manifest.csv",
+        ordinary_records,
+    )
+    write_summary(
+        output_dir / "summary.json",
+        records,
+        selected_records,
+        weighted_records,
+        balanced_records,
+        ordinary_records,
+    )
     if args.copy_files:
         copy_grouped_files(output_dir, records)
 
@@ -81,9 +105,12 @@ def read_record(path):
 
     touch_values = touch_frame_stats(touch_frames)
     impact_values = impact_frame_stats(frames)
-    label_id = motion_state + "_" + touch_strength
-    if finger_type and finger_type != "unknown":
-        label_id = label_id + "_" + finger_type
+    if touch_strength == "ordinary":
+        label_id = ORDINARY_CLASS_LABEL
+    else:
+        label_id = motion_state + "_" + touch_strength
+        if finger_type and finger_type != "unknown":
+            label_id = label_id + "_" + finger_type
     cnn_heavy = finite_float(cnn.get("heavyProbability"), None)
     cnn_light = finite_float(cnn.get("lightProbability"), None)
     cnn_margin = None
@@ -177,6 +204,9 @@ def build_class_stats(records):
 def build_context_stats(records):
     values = defaultdict(lambda: defaultdict(list))
     for record in records:
+        # 中文注释：普通点击只用于拒识评估，不能改变正类质量阈值分布。
+        if record.get("label_id") == ORDINARY_CLASS_LABEL:
+            continue
         key = quality_context_key(record)
         for field in ("max_abs_delta", "path_travel_px"):
             value = finite_float(record.get(field), None)
@@ -219,7 +249,10 @@ def apply_quality_decision(record, class_stats, context_stats=None):
     warnings = []
     score = 100
 
-    if record["touch_strength"] not in ("light", "heavy"):
+    if (
+        record["touch_strength"] not in ("light", "heavy")
+        and record["touch_strength"] != "ordinary"
+    ):
         reasons.append("missing_manual_strength")
         score -= 70
     if record["motion_state"] not in ("handheld_static", "placed_static", "walking"):
@@ -307,6 +340,8 @@ def select_weighted_records(records):
     for record in records:
         if record.get("quality_bucket") not in (KEEP_DIR, REVIEW_DIR):
             continue
+        if record.get("label_id") == ORDINARY_CLASS_LABEL:
+            continue
         record["sample_weight"] = sample_weight_for_record(record, {})
         selected.append(record)
     return selected
@@ -392,6 +427,8 @@ def balance_records(records, max_per_class):
 
 
 def sample_weight_for_record(record, class_stats):
+    if record.get("label_id") == ORDINARY_CLASS_LABEL:
+        return 0.0
     bucket = record.get("quality_bucket")
     if bucket == REJECT_DIR:
         return 0.0
@@ -453,7 +490,14 @@ def write_manifest(path, records):
             writer.writerow({field: record.get(field, "") for field in fields})
 
 
-def write_summary(path, records, selected_records, weighted_records, balanced_records):
+def write_summary(
+    path,
+    records,
+    selected_records,
+    weighted_records,
+    balanced_records,
+    ordinary_records,
+):
     bucket_counts = Counter(record.get("quality_bucket", "unknown") for record in records)
     label_counts = Counter(record.get("label_id", "unknown") for record in records)
     selected_label_counts = Counter(record.get("label_id", "unknown") for record in selected_records)
@@ -473,6 +517,8 @@ def write_summary(path, records, selected_records, weighted_records, balanced_re
         "selectedForTraining": len(selected_records),
         "weightedForTraining": len(weighted_records),
         "balancedForTraining": len(balanced_records),
+        "ordinaryNegativeCount": len(ordinary_records),
+        "ordinaryNegativeUsage": "false_acceptance_only",
         "bucketCounts": dict(sorted(bucket_counts.items())),
         "labelCounts": dict(sorted(label_counts.items())),
         "selectedLabelCounts": dict(sorted(selected_label_counts.items())),

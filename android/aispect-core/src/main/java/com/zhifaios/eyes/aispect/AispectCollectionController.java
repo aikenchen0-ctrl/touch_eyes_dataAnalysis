@@ -14,6 +14,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class AispectCollectionController {
     private static final String IDENTITY_PREFERENCES = "aispect_collector_identity";
@@ -31,6 +33,8 @@ public final class AispectCollectionController {
         public long postTouchCapturePollIntervalMs = 8L;
         public long postTouchCaptureTimeoutMs = 500L;
         public boolean enableCnnDiagnostics = false;
+        // 引导采集可按单元格配额暂停；默认关闭以保留其他 SDK 调用方的连续采集行为。
+        public int targetSamplesPerCell = 0;
     }
 
     public static final class Status {
@@ -130,7 +134,7 @@ public final class AispectCollectionController {
     private int acceptedCount;
     private int rejectedCount;
     private long collectionSessionStartedAtMillis;
-    private String collectionSessionId = UUID.randomUUID().toString();
+    private String collectionSessionId = "";
     private long downEventTimeMillis;
     private long downEventElapsedRealtimeNanos;
     private long downReceivedElapsedRealtimeNanos;
@@ -150,6 +154,12 @@ public final class AispectCollectionController {
     private Runnable downWindowPoll;
     private String lastEventKey = "collector_idle";
     private String lastEventDetail;
+    private final AispectCollectionProgress taskProgress = new AispectCollectionProgress();
+    private final ExecutorService reviewExecutor = Executors.newSingleThreadExecutor();
+    private AispectDataLogger.SavedRecord latestSavedRecord;
+    private AispectCollectionProgress.Entry latestProgressEntry;
+    private boolean reviewPending;
+    private boolean closed;
 
     public AispectCollectionController(Context context) {
         SharedPreferences preferences = context.getSharedPreferences(IDENTITY_PREFERENCES, Context.MODE_PRIVATE);
@@ -234,8 +244,12 @@ public final class AispectCollectionController {
     }
 
     public void setSelectedLabel(AispectModels.DatasetLabel label) {
-        if (enabled || activeTouch) {
+        if (label == null || activeTouch || activeSaveScheduled || reviewPending) {
             return;
+        }
+        if (!sameCollectionCondition(selectedLabel, label)) {
+            // 条件变化才开启新会话；同一条件内暂停恢复继续使用原会话身份。
+            invalidateCollectionSession();
         }
         selectedLabel = label;
         clearLatestPredictionSnapshot();
@@ -264,10 +278,12 @@ public final class AispectCollectionController {
     }
 
     public void setCollectorUserName(String userName) {
-        if (enabled || activeTouch) {
+        if (enabled || activeTouch || activeSaveScheduled || reviewPending) {
             return;
         }
-        selectedUserName = AispectModels.CollectorIdentity.normalizeUserName(userName);
+        String normalized = AispectModels.CollectorIdentity.normalizeUserName(userName);
+        if (!normalized.equals(selectedUserName)) invalidateCollectionSession();
+        selectedUserName = normalized;
     }
 
     public String collectorUserName() {
@@ -278,10 +294,66 @@ public final class AispectCollectionController {
         return AispectModels.CollectorIdentity.isValidUserName(selectedUserName);
     }
 
+    public boolean canSelectLabel() {
+        return !activeTouch && !activeSaveScheduled && !reviewPending;
+    }
+
+    public int selectedTaskCount() {
+        return taskCount(selectedLabel);
+    }
+
+    public int taskCount(AispectModels.DatasetLabel label) {
+        return taskProgress.count(label.collectionContext.progressKey(selectedUserName,
+                label.fingerType.key(), label.touchStrength.key()));
+    }
+
+    public boolean canReviewSelectedTask() {
+        return canReviewLatest() && latestProgressEntry != null
+                && latestProgressEntry.key.equals(selectedLabel.collectionContext.progressKey(selectedUserName,
+                selectedLabel.fingerType.key(), selectedLabel.touchStrength.key()));
+    }
+
+    public boolean canReviewLatest() {
+        return !closed && !reviewPending && !activeTouch && !activeSaveScheduled && latestSavedRecord != null;
+    }
+
+    public void reviewLatest(String reviewStatus) {
+        AispectCollectionProgress.validateReviewStatus(reviewStatus);
+        if (!canReviewLatest()) return;
+        final AispectDataLogger.SavedRecord record = latestSavedRecord;
+        final AispectCollectionProgress.Entry entry = latestProgressEntry;
+        reviewPending = true;
+        emitStatus();
+        reviewExecutor.execute(() -> {
+            Exception failure = null;
+            try {
+                AispectSampleReviewStore.write(record.file, entry.sampleId, reviewStatus);
+            } catch (Exception error) {
+                failure = error;
+            }
+            final Exception result = failure;
+            handler.post(() -> {
+                reviewPending = false;
+                if (closed) return;
+                if (result == null) {
+                    taskProgress.review(entry, reviewStatus);
+                    lastEventKey = "collector_review_" + reviewStatus;
+                } else {
+                    lastEventKey = "collector_review_failed";
+                }
+                lastEventDetail = null;
+                emitStatus();
+            });
+        });
+    }
+
     public void setEnabled(boolean enabled) {
+        if (enabled && (activeTouch || activeSaveScheduled || reviewPending)) return;
         if (enabled && !canStartCollection()) {
             return;
         }
+        if (enabled && config.targetSamplesPerCell > 0
+                && selectedTaskCount() >= config.targetSamplesPerCell) return;
         this.enabled = enabled;
         clearLatestPredictionSnapshot();
         if (enabled) {
@@ -289,8 +361,7 @@ public final class AispectCollectionController {
             rejectedCount = 0;
             cancelDownWindowPoll();
             downWindowGate.reset();
-            collectionSessionStartedAtMillis = System.currentTimeMillis();
-            collectionSessionId = UUID.randomUUID().toString();
+            ensureCollectionSession();
             activeCollectorIdentity = new AispectModels.CollectorIdentity(selectedUserName, deviceId);
             normalizationEngine.resetBaseline();
             signalCollector.start();
@@ -312,6 +383,8 @@ public final class AispectCollectionController {
     }
 
     public void shutdown() {
+        closed = true;
+        reviewExecutor.shutdown();
         cancelDownWindowPoll();
         downWindowGate.reset();
         activeTouch = false;
@@ -572,6 +645,9 @@ public final class AispectCollectionController {
         if (label != null && label.touchStrength == AispectModels.TouchStrength.HEAVY) {
             return AispectModels.TouchKind.HEAVY_TAP;
         }
+        if (label != null && label.touchStrength == AispectModels.TouchStrength.ORDINARY) {
+            return AispectModels.TouchKind.SAMPLE;
+        }
         return AispectModels.TouchKind.LIGHT_TAP;
     }
 
@@ -669,9 +745,18 @@ public final class AispectCollectionController {
                     signalSnapshot
             );
             normalizationEngine.observe(latestNormalizationProfile);
+            latestSavedRecord = record;
+            latestProgressEntry = taskProgress.recordSaved(record.json.getString("id"),
+                    activeLabel.collectionContext.progressKey(activeCollectorIdentity.userName,
+                            activeLabel.fingerType.key(), activeLabel.touchStrength.key()));
             acceptedCount += 1;
             lastEventKey = "collector_event_saved";
             lastEventDetail = activeLabel.datasetKey();
+            if (config.targetSamplesPerCell > 0 && selectedTaskCount() >= config.targetSamplesPerCell) {
+                // 最后一条已落盘才暂停；保留当前标签和复核入口，不能自动开始下一组。
+                enabled = false;
+                lastEventKey = "collector_group_completed";
+            }
             Status status = makeStatus();
             if (listener != null) {
                 listener.onRecordSaved(record, status);
@@ -693,6 +778,7 @@ public final class AispectCollectionController {
             activeTouchFrames.clear();
             activeEvents.clear();
             endingEvent = null;
+            emitStatus();
         }
     }
 
@@ -712,6 +798,39 @@ public final class AispectCollectionController {
         latestContactEncodingProfile = null;
     }
 
+    String collectionSessionIdForTesting() {
+        return collectionSessionId;
+    }
+
+    long collectionSessionStartedAtMillisForTesting() {
+        return collectionSessionStartedAtMillis;
+    }
+
+    private void ensureCollectionSession() {
+        if (collectionSessionStartedAtMillis <= 0L || collectionSessionId == null
+                || collectionSessionId.isEmpty()) {
+            collectionSessionStartedAtMillis = System.currentTimeMillis();
+            collectionSessionId = UUID.randomUUID().toString();
+        }
+    }
+
+    private void invalidateCollectionSession() {
+        collectionSessionStartedAtMillis = 0L;
+        collectionSessionId = "";
+    }
+
+    static boolean sameCollectionCondition(AispectModels.DatasetLabel first,
+                                           AispectModels.DatasetLabel second) {
+        if (first == null || second == null) return false;
+        AispectCollectionContext left = first.collectionContext;
+        AispectCollectionContext right = second.collectionContext;
+        return left.task == right.task
+                && left.grip.equals(right.grip)
+                && left.support.equals(right.support)
+                && left.collectionProtocol.equals(right.collectionProtocol)
+                && left.scheduleId.equals(right.scheduleId);
+    }
+
     private Status makeStatus() {
         return new Status(
                 enabled,
@@ -724,7 +843,7 @@ public final class AispectCollectionController {
                 capabilityProfiler.snapshot(),
                 latestPrediction,
                 classifier.modelInfoForId(selectedModelId),
-                enabled || activeTouch,
+                enabled || activeTouch || activeSaveScheduled || reviewPending,
                 latestSampleRateHz,
                 latestImpactMaxAbsDelta,
                 latestImpactLog,

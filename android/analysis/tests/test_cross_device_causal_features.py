@@ -132,7 +132,7 @@ class CrossDeviceCausalFeatureTests(unittest.TestCase):
 
         self.assertEqual(baseline["matrix"], actual["matrix"])
 
-    def test_missing_radius_is_reported_by_mask_not_as_valid_geometry(self):
+    def test_positive_shape_without_declared_range_remains_usable(self):
         self.assertIsNotNone(cross_device)
         fixture = self.load_fixture()
         record = copy.deepcopy(fixture["records"]["android_200hz"])
@@ -141,13 +141,36 @@ class CrossDeviceCausalFeatureTests(unittest.TestCase):
         actual = cross_device.build_time_grid_matrix(
             fixture,
             record,
-            "causal_time_grid_imu11_touch9_v2",
+            "causal_time_grid_imu11_touch9_mask6_v4",
+        )
+
+        self.assertEqual(1, actual["missingMasks"][1]["major"])
+        self.assertEqual(1, actual["missingMasks"][1]["minor"])
+        self.assertGreater(actual["matrix"][1][13], 0.0)
+        self.assertGreater(actual["matrix"][1][14], 0.0)
+        self.assertGreater(actual["matrix"][1][15], 0.0)
+
+    def test_non_positive_shape_is_missing_even_when_range_is_declared(self):
+        self.assertIsNotNone(cross_device)
+        fixture = self.load_fixture()
+        record = copy.deepcopy(fixture["records"]["android_200hz"])
+        record["touchFrames"][0]["touchMajor"] = 0.0
+        record["touchFrames"][0]["touchMinor"] = -1.0
+        record["touchFrames"][0]["axisAvailability"] = {
+            "hasTouchMajorRange": True,
+            "hasTouchMinorRange": True,
+        }
+        actual = cross_device.build_time_grid_matrix(
+            fixture,
+            record,
+            "causal_time_grid_imu11_touch9_mask6_v4",
         )
 
         self.assertEqual(0, actual["missingMasks"][1]["major"])
         self.assertEqual(0, actual["missingMasks"][1]["minor"])
         self.assertEqual(0.0, actual["matrix"][1][13])
         self.assertEqual(0.0, actual["matrix"][1][14])
+        self.assertEqual(0.0, actual["matrix"][1][15])
 
     def test_pointer_count_missing_is_reported_by_mask(self):
         self.assertIsNotNone(cross_device)
@@ -162,6 +185,55 @@ class CrossDeviceCausalFeatureTests(unittest.TestCase):
 
         self.assertEqual(0, actual["missingMasks"][1]["pointerCount"])
         self.assertEqual(0.0, actual["matrix"][1][18])
+
+    def test_axis_motion_range_audit_does_not_change_model_matrix(self):
+        self.assertIsNotNone(cross_device)
+        fixture = self.load_fixture()
+        record = copy.deepcopy(fixture["records"]["android_200hz"])
+        baseline = cross_device.build_time_grid_matrix(
+            fixture,
+            record,
+            "causal_time_grid_imu11_touch9_v2",
+        )
+        for frame in record["touchFrames"]:
+            frame["axisMotionRanges"] = {
+                "touchMajor": {
+                    "source": 4098,
+                    "min": 0.0,
+                    "max": 40.0,
+                    "flat": 0.0,
+                    "fuzz": 0.0,
+                    "resolution": 0.1,
+                }
+            }
+        actual = cross_device.build_time_grid_matrix(
+            fixture,
+            record,
+            "causal_time_grid_imu11_touch9_v2",
+        )
+
+        self.assertEqual(baseline["matrix"], actual["matrix"])
+        self.assertEqual(
+            2,
+            actual["touchAxisRangeAudit"]["framesWithMotionRanges"],
+        )
+        self.assertEqual(
+            40.0,
+            actual["touchAxisRangeAudit"]["ranges"]["touchMajor"][
+                "declaredMax"
+            ],
+        )
+        self.assertEqual(
+            0.75,
+            actual["touchAxisRangeAudit"]["ranges"]["touchMajor"][
+                "valueFractionMedian"
+            ],
+        )
+        self.assertIsNotNone(
+            actual["touchAxisRangeAudit"]["ranges"]["touchMajor"][
+                "declaredToViewDiagonalMedian"
+            ]
+        )
 
     def test_touch_coordinate_transform_maps_landscape_to_canonical_view(self):
         self.assertIsNotNone(cross_device)

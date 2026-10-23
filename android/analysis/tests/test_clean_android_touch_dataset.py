@@ -1,4 +1,7 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from android.analysis import clean_android_touch_dataset as cleaner
 
@@ -62,6 +65,30 @@ class ContextQualityTests(unittest.TestCase):
         weight = cleaner.sample_weight_for_record(record, {})
 
         self.assertLess(weight, 0.35)
+
+    def test_ordinary_touch_is_kept_for_rejection_evaluation(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "ordinary.json"
+            path.write_text(
+                json.dumps({
+                    "id": "ordinary-a",
+                    "label": {
+                        "touchStrength": "ordinary",
+                        "motionState": "handheld_static",
+                        "fingerType": "thumb",
+                    },
+                }),
+                encoding="utf-8",
+            )
+
+            record = cleaner.read_record(path)
+
+        self.assertTrue(record["load_ok"])
+        self.assertEqual(
+            cleaner.ORDINARY_CLASS_LABEL,
+            record["label_id"],
+        )
+        self.assertEqual(0.0, cleaner.sample_weight_for_record(record, {}))
 
 
 if __name__ == "__main__":

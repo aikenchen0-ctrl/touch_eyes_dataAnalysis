@@ -32,6 +32,13 @@ public final class AispectTouchFrame {
     public final boolean hasPressureRange;
     public final boolean hasSizeRange;
     public final boolean hasOrientationRange;
+    final AispectTouchAxisRange touchMajorRange;
+    final AispectTouchAxisRange touchMinorRange;
+    final AispectTouchAxisRange toolMajorRange;
+    final AispectTouchAxisRange toolMinorRange;
+    final AispectTouchAxisRange pressureRange;
+    final AispectTouchAxisRange sizeRange;
+    final AispectTouchAxisRange orientationRange;
 
     private AispectTouchFrame(
             double relativeTimestampSeconds,
@@ -57,7 +64,14 @@ public final class AispectTouchFrame {
             boolean hasToolMinorRange,
             boolean hasPressureRange,
             boolean hasSizeRange,
-            boolean hasOrientationRange
+            boolean hasOrientationRange,
+            AispectTouchAxisRange touchMajorRange,
+            AispectTouchAxisRange touchMinorRange,
+            AispectTouchAxisRange toolMajorRange,
+            AispectTouchAxisRange toolMinorRange,
+            AispectTouchAxisRange pressureRange,
+            AispectTouchAxisRange sizeRange,
+            AispectTouchAxisRange orientationRange
     ) {
         this.relativeTimestampSeconds = relativeTimestampSeconds;
         this.eventTimeMillis = eventTimeMillis;
@@ -85,6 +99,13 @@ public final class AispectTouchFrame {
         this.hasPressureRange = hasPressureRange;
         this.hasSizeRange = hasSizeRange;
         this.hasOrientationRange = hasOrientationRange;
+        this.touchMajorRange = touchMajorRange;
+        this.touchMinorRange = touchMinorRange;
+        this.toolMajorRange = toolMajorRange;
+        this.toolMinorRange = toolMinorRange;
+        this.pressureRange = pressureRange;
+        this.sizeRange = sizeRange;
+        this.orientationRange = orientationRange;
     }
 
     public static AispectTouchFrame fromCurrent(MotionEvent event, int pointerIndex, long downEventTime, int width, int height) {
@@ -153,8 +174,27 @@ public final class AispectTouchFrame {
         axes.put("hasSizeRange", hasSizeRange);
         axes.put("hasOrientationRange", hasOrientationRange);
         json.put("axisAvailability", axes);
+        JSONObject ranges = new JSONObject();
+        putRange(ranges, "touchMajor", touchMajorRange);
+        putRange(ranges, "touchMinor", touchMinorRange);
+        putRange(ranges, "toolMajor", toolMajorRange);
+        putRange(ranges, "toolMinor", toolMinorRange);
+        putRange(ranges, "pressure", pressureRange);
+        putRange(ranges, "size", sizeRange);
+        putRange(ranges, "orientation", orientationRange);
+        json.put("axisMotionRanges", ranges);
         json.put("contactPatch", AispectContactPatch.fromFrame(this).toJson());
         return json;
+    }
+
+    private static void putRange(
+            JSONObject ranges,
+            String name,
+            AispectTouchAxisRange range
+    ) throws JSONException {
+        if (range != null) {
+            ranges.put(name, range.toJson());
+        }
     }
 
     static AispectTouchFrame forTesting(
@@ -227,7 +267,14 @@ public final class AispectTouchFrame {
                 false,
                 false,
                 false,
-                hasOrientationRange
+                hasOrientationRange,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
         );
     }
 
@@ -279,7 +326,14 @@ public final class AispectTouchFrame {
                 axes.hasToolMinorRange,
                 axes.hasPressureRange,
                 axes.hasSizeRange,
-                axes.hasOrientationRange
+                axes.hasOrientationRange,
+                axes.touchMajorRange,
+                axes.touchMinorRange,
+                axes.toolMajorRange,
+                axes.toolMinorRange,
+                axes.pressureRange,
+                axes.sizeRange,
+                axes.orientationRange
         );
     }
 

@@ -1,5 +1,15 @@
 # 技术说明渐进式生效披露关闭手电筒轻量虚拟列表，仅监听滚动并按需复用可视项，用于侧栏大规模头像/流程列表。
 
+## 六任务姿态补采与复核协议（2026-10-05）
+
+- `AispectCollectionTask` / `AispectCollectionContext`：Android 和 iOS 共用六任务 ID、握持、支撑及 `touch_collection_context_v1` 语义；`sceneSource` 明确是任务指令而非自动证实的姿势。轻重、手指类别不与场景混合，也不修改模型输入。
+- Android `CollectionTaskControls` / `AispectCollectionController`：任务级选择、采集时锁定、当前分组试采目标 10 条，以及最近已保存样本的复核。进度仅在本次控制器存活期间有效，写入成功后增加，做错／不确定扣除，确认可恢复。
+- `AispectSampleReviewStore`：通过 `annotations/<sampleId>.json` 原子保存 `touch_sample_review_v1`，记录样本身份、状态与递增历史；不改写或删除原始信号。导出必须保留整个旁车目录。
+- Android `AispectDataLogger`：保持原始 schema 6，新增任务与自动上下文；记录按下前 IMU 携带的重力，独立重力时间未知则明确标记。显示旋转注明写入阶段，内外屏和折叠状态不做推断。
+- iOS `AispectCollectionTaskPanel` / `AispectImpactDatasetCollector`：新增手指、用户代号、任务、握持／支撑、进度和复核；旧手指标签缺失保持 unknown。修复写入失败仍计成功的问题，排除面板触摸并停用采集期间的业务触觉反馈。iOS 保持 schema 5，新增元数据不等于已具备 Android 双时钟和硬件时间。
+- `collection_annotations.py` / 第二、三层数据构建器：排除做错与不确定，校验身份、历史及复核哈希；原始副本复核冲突时隔离。任务元数据随来源和训练视图保留，但不进入特征矩阵。历史原始训练入口和样本缓存也执行复核校验。
+- 完整操作、跨端能力边界、验证范围见 `docs/COLLECTION_TASKS_V1_20261005.md`。本轮没有重训或修改已部署模型，不能以采集端构建成功声称真实准确率提升。
+
 ## 闭眼检测补充
 - `AispectBlinkDetector`：闭眼检测改为 `Vision + AVCaptureSession` 主链，优先使用前置 RGB 相机在 `640x480` 低分辨率下做实时人脸 landmarks 与眼睑开合比计算，仅在 Vision 会话不可用时退回 `ARKit`，显著降低启动负担与持续功耗。
 - `AispectBlinkDetector`：Vision 分支使用前置串行视频输出、丢弃积压帧、ROI 扩张后的人脸 landmarks 检测与轻量目标跟踪，首帧仍输出延迟指标，便于继续对比启动耗时。
@@ -468,3 +478,53 @@
 - 2026-08-10：修复按下期时间网格模型的运行链路：模型推理改为直接读取完整 IMU 滚动缓存，经固定物理时间网格重采样后输入，旧模型继续使用历史 `-5...+9` 帧窗口；验证模式在抬起后保留最近一次按下期预测，并持续预热 IMU，直到下一次 `ACTION_DOWN` 才清空结果，避免有效预测被收尾流程覆盖。
 - 2026-08-10：修复 20 通道 `no_gravity` 实验模型真机推理时因触摸可用性掩码仍使用 23 通道固定索引而越界崩溃的问题；GroupNorm 运行时改为按特征名动态解析掩码列，并增加完整 `predict()` 回归测试。模型权重与 scaler 数值参数不变，无需重新训练。
 - 2026-08-10：Android 原始双锚点窗口升级为 `85ms + 15帧` 双下限；抬起后改为 85ms 首次检查、8ms 条件轮询和 500ms 超时，schema v6 新增版本化 `captureWindow` 审计对象。按下期九槽模型输入保持不变，iOS 同构改造仍待完成。
+- 2026-10-05：在独立采集仓库实现六任务、任务级场景元数据、最近样本复核和训练入口隔离，Android／iOS 对齐任务协议；未修改 SuperAppAndroid、模型权重或识别阈值。
+- 2026-10-05：验证新增 JVM 7/7、Python 复核与派生数据回归 29/29 通过；完整 JVM 为 51/53，另两项未改动的特征测试仍失败；额外训练入口测试为 37/39，另两项缺少 PyTorch。Android 两个 Debug flavor 构建成功，未安装；iOS 无 Xcode 编译／真机证据。完整失败项、产物路径和哈希已记入六任务文档。
+
+## touch26 统计 MLP 端侧实验候选
+
+- 输入合同为 `causal_time_grid_imu11_touch7_mask5_stats_mlp_v1`。Android 从 23 通道因果网格投影出九个时间槽 x 十个物理通道：`x_norm`、`y_norm`、三轴线性加速度、三轴角速度、`size`、`log_axis_ratio`。源索引固定为 `0,1,2,3,4,5,6,7,12,15`；`size` 或长短轴不可用时以零占位。
+- 每个物理通道依次生成 `mean/std/min/max/last_delta`，再追加加速度与角速度的模长、峰值和 jerk，共 60 个统计特征。顺序在 Python 训练、JSON 导出和 Java 运行时三处冻结，不允许按列号猜测。2026-10-22 修复了训练端曾按“先所有通道均值、再所有通道标准差”排列的问题；该缺陷会使权重、特征名和端侧输入错位，旧产物仅保留为失效审计副本。
+- `stats_mlp_v1` 固定执行 `Linear(60,24) -> GELU -> Linear(24,24) -> GELU`，分别输出 finger 与 strength 两个二分类头，再组合为 `thumb_light`、`thumb_heavy`、`index_light`、`index_heavy` 四类概率。dropout 只在训练期生效，端侧推理必须关闭。
+- `train_stats_mlp_android_candidate.py` 只接受 `OnePlus PHK110`，在完整候选集上拟合序列 scaler 与统计 scaler。固定训练预算为 55 轮、24 隐层和种子 `20261022`，产物显式写入 `evaluationScope=all_data_fit_only`、`deploymentAllowed=false`。
+- `export_stats_mlp_android_model.py` 严格检查八个权重张量的名称与形状、十个物理通道及源索引、60 个统计特征顺序、双头标签顺序、dropout 推理状态与实验部署边界，再生成 `AispectStatsMlpWeights_*` 和 `AispectStatsMlpScaler_*`。
+- Android `AispectStatsMlpRuntime` 执行同一套归一化、统计、矩阵乘、GELU、softmax 和双头组合，并校验合同与张量形状。`AispectImpactCNNClassifier` 按 `runtimeArchitecture` 分派 Stats MLP、GroupNorm CNN 与旧 CNN；实验模型只追加到 catalog 末尾，不替换默认 CNN，也不改变 catalog 第一项。
+- 2026-10-22：全量候选完成 29,513 条、58 个 session 的拟合，参数量 2,164，修复后训练集 balanced accuracy 为 `95.55%`。该数值是全量拟合结果，不能视为泛化准确率。修复后严格 session 隔离五折得到平均 BA `82.08%`、最差折 `79.42%`、最差类召回 `66.67%`；嵌套验证平均 BA `80.22%`、最差折 `76.09%`、最差类召回 `60.11%`。修复前报告的平均 BA `80.96%`、最差类召回 `63.45%` 和嵌套结果不再作为该候选指标，因为它们受统计列错位及重复 softmax 目标影响。当前证据仍只有单设备跨 session，不能上线替换默认模型。
+- 2026-10-22：修复后的 Stats MLP24 使用一次前向产生两个头，联合概率按对数概率直接计算 NLL；训练与三份验证入口共用 `four_class_losses()`，避免再次把联合概率二次 softmax。Python 合同与导出测试 6 项、因果特征测试 8 项通过；Android `:aispect-core:testDebugUnitTest` 共 70 项通过。导出资产的 SHA-256 为：scaler `55AEB39750C534DBAB1B4FA31BB8E7099C67AD6947933913F0E94265CD8F6D57`，weights `693AE1BA1B47B7950C36DCB06D58514B1E407F0E3A6D4275BFBF7A82694FC408`。首次 Gradle 下载因网络 `Premature EOF` 中断，改用本机 JDK 17、固定 Gradle 8.7 与 Android SDK 后完成真实编译和测试。已构建 crossDevice/standard Debug APK，未安装真机、未执行跨设备留出或端侧延迟基准。
+- 2026-10-22：`AispectStatsMlpRuntime.predictHeads()` 已作为只读双头推理接口加入，返回独立的 `finger[thumb,index]` 与 `strength[light,heavy]` 概率；`predict()` 仍组合为四分类，调用方可在低置信度时只使用通过门禁的单头或拒绝输出。`aispect-core` Debug 与 Release 单元测试共 70 项通过。
+- 2026-10-22：跨设备复核发现训练集 656 条、4 台设备、56 个 session 全部为旧单类别 session；上下文元数据、交错协议、跨类别 session 和姿态留出四项门禁均未通过。四分类尾部校准最差折 BA 最高约 49.58%，最差类召回仍为 0%；设备等权与触摸内尺度实验最差折 BA 约 49.7% 至 51.8%，未改变结论。旧尺寸实验的列号错误产物、无逐帧量程元数据的数据和设备 oracle 均不得作为部署证据。
+- 2026-10-22：双头实验把“力度”和“手指”拆开评估。力度头在 90% 目标覆盖下实际覆盖 87.33%、接受准确率 89.75%、最差折 BA 70.55%、最差类召回 47.22%，只能作为研究候选；手指头实际覆盖 98.02%、接受准确率 66.50%、最差折 BA 50%、最差类召回 0%，不可部署。实验报告的 `taskReadiness` 现在同时检查数据协议门禁、最差折 BA、平均准确率和最差类召回，并区分 `not_ready`、`candidate` 与 `deployment_eligible`。
+- 2026-10-22：训练前必须使用 `--require-training-ready` 才能进入正式候选流程；旧数据只允许做可复现的探索实验。后续采集必须在同一 session 内交错四类，并记录 `bodyPosture`、`requestedDevicePose`、`grip`、`support`、`taskId` 与 `collectionProtocol=interleaved_v2`，再进行留一设备、留一姿态、留一 session 和类别平衡 bootstrap 验证。
+- 2026-10-23：普通点击恢复为独立误触审计样本，使用 `TouchStrength.ORDINARY`、`collectionProtocol=negative_tap_v1` 与 `touch_collection_context_v1`。该模式不伪造四类交错协议，不改变四类配额或训练标签。
+
+## touch26 普通点击误触审计
+
+- `AispectCollectionContext.negative()` 固化普通点击任务、握持、支撑与 `targetPerCell`；`AispectCollectionPlan.negativeLabel()` 返回独立的普通点击标签，不推进四类 schedule。
+- `CollectionTaskControls` 提供显式模式切换、独立进度与独立配额。普通点击达到配额后自动退出审计模式，不占用四类交错进度。
+- 四类交错轮换只在任务、握持、支撑、协议或 schedule 变化时重建 session；同一 session 内的手指与力度标签轮换继续沿用原 session，避免把正常交错误拆成单标签 session。
+- 普通点击与四类正样本使用不同协议，因此切换审计模式会建立独立 session。普通点击只写入 `ordinary_touch26.jsonl`，并保留 `classLabel`、`collectionProtocol`、`strengthTruthSource`、`taskId`、`bodyPosture`、`requestedDevicePose`、`grip`、`support` 与 `labelStatus`，用于固定误触率评估。
+- `build_time_grid_training_dataset.py` 把 `ordinary_touch` 标记为 `ordinary_touch_negative_sample` 并排除出 `training_touch26.jsonl` 与严格训练折；该隔离只影响拒识审计，不能把普通点击作为轻重监督真值。
+- `run_gate_nested_validation.py --ordinary-click-dataset-dir` 读取 `ordinary_touch26.jsonl` 作为纯评估负样本。读取时强制校验 `classLabel=ordinary_touch`、`collectionProtocol=negative_tap_v1`、`[9,26]` 矩阵形状和非空 `sourceSha256`，并在训练集或四类外测集出现同一来源时直接失败。
+- `fixed_negative_audit_report()` 使用训练折内部校准得到的冻结阈值评估普通点击，不重新选择阈值，也不让普通点击参与拟合、早停或校准。报告按设备、身体姿势、运动状态和 session 输出接受率；只有负样本数量达到证明门槛时才标记 `proofReady=true`。
+- 普通点击审计与轻触代理指标分开报告。轻触仍是当前训练中的拒识代理，普通点击是产品误触审计；两者不能合并成一个准确率，也不能用轻触结果代替真实普通点击证据。
+- `run_gate_nested_validation.py --imu-mode gravity_aligned` 使用每次触摸按下前 7 帧的重力中位方向建立设备局部坐标系，把三轴加速度与三轴角速度旋转到统一的重力参考系；重力向量本身不进入分类器。`gravity_aligned_pretouch_centered` 在同一坐标系内继续减去按下前 IMU 中位偏置。该变换只依赖当前触摸的过去帧，不增加运行时输入宽度，也不旋转触摸位置和接触形态。缺少磁力计等绝对航向信息时，绕重力方向的偏航无法观测，因此该模式只消除可由重力确定的横滚和俯仰轴差异，不能宣称消除全部设备朝向。缺失有效按下前重力的样本会在训练准备阶段明确失败，报告同时记录全训练集的覆盖数，避免静默退回设备相关坐标。
+
+## touch26 接触尺寸域偏移实验
+
+- `run_stats_mlp_contact_size_experiments.py` 将接触面积拆为绝对尺度、单次触摸内相对变化、触摸内 IQR 标准化、session 中位尺度、session IQR 标准化、因果热身 session 尺度、面积长轴比和可用性八类信号。所有归一化只读取未标注输入；`causal_median_N` 严格按 `sourceFile` 与 `sourceSha256` 排序，只使用当前 session 最早的 N 次触摸，不读取后续触摸或类别。
+- 实验固定训练轮数，不使用外层验证标签选择 epoch，避免模型选择本身抬高最差折指标。每条报告同时记录平均平衡准确率、最差折平衡准确率和最差类召回；上线判断仍以严格嵌套验证和真机场景为准。
+- 尺寸审计同时计算 session 方差占比、类别效应占比，以及 session 内按采集顺序七成拟合、三成探测的最近中位尺度身份探针。另以按 session 分组的逻辑回归探针比较“全部十个物理通道”和“仅九个 `size` 帧”对未见 session 的身份可辨识性；后者的随机概率是训练 session 数量的倒数。身份探针用于判断接触面积是否主要携带设备或采集批次指纹，它不是部署模型，也不证明单纯降低身份准确率就能提升分类。
+- `within_touch_median` 和 `within_touch_iqr_z` 可在单次触摸结束时直接计算，无需跨触摸状态；`session_median_oracle` 和 `session_iqr_z_oracle` 使用整段验证 session 的无标签分布，只作上限诊断，不能作为可部署结果。
+- 2026-10-22：新增实验脚本及六项纯函数测试，覆盖触摸内相对变化、缺失值、因果热身不读取后续触摸、仅保留形状合同、长轴可用性双门控和 session 分组身份探针。实验尚未通过严格嵌套门槛前，不修改 Android 特征合同、模型权重或默认模型。
+- 2026-10-23：新增普通点击独立审计协议、采集界面模式切换和数据清洗隔离；Python 合同测试 21 项通过，Android `aispect-core` 采集计划与任务测试通过。普通点击暂不进入四类训练，待补齐跨设备、跨姿势困难负样本后再评估固定 FPR 下的召回。
+- 2026-10-23：严格嵌套验证接入普通点击冻结阈值审计，强制来源去重和训练/外测重叠拒绝，并输出设备、姿势、运动状态分组误接受率；普通点击不参与拟合或阈值选择，指定 Python 回归测试 48 项通过。
+
+## touch26 v5 因果源合同与 Stats MLP v3
+
+- `causal_time_grid_imu11_touch7_mask5_v5` 固定为九帧乘二十三列。它保留触摸位置、压力、尺寸、长短轴、轴比、指针数和五个可用性掩码，删除 `orientation_sin`、`orientation_cos` 与 `orientation_available`。方向信息容易把设备朝向编码成力度捷径，因此 v5 不再让主模型直接读取。
+- v5 的九个时间槽使用整批 IMU 支撑全部到齐后的同一可用时刻，再选择该时刻已经到达、且事件时间不晚于目标槽的最近触摸帧。v4 和更早合同继续逐槽使用各自可用时刻，保证历史缓存仍可复现；不能把两种时序混入同一个训练视图。
+- `AispectStatsMlpRuntime` 的 v3 合同为 `causal_time_grid_imu11_touch7_mask5_stats_mlp_v3`，并强制声明 `sourceFeatureContract=causal_time_grid_imu11_touch7_mask5_v5`。物理输入仍是九帧乘十通道，源索引固定为 `0,1,2,3,4,5,6,7,12,15`；`size` 或长短轴不可用时以零占位。v1、v2 只保留历史加载兼容。
+- 训练构建器把 `canonical_imu11_touch7_mask5_v5.jsonl` 和 `training_touch23.jsonl` 作为新候选入口。v4 的 `training_touch26.jsonl` 只在历史派生文件存在时生成，旧格式缺失不得阻塞 v5 主线。
+- 本轮新增测试覆盖 23 列合同、无方向字段、Stats MLP v3 的十列物理视图、整批可用时刻与逐槽时刻差异、迟到触摸不得进入输入、事件时间晚于目标槽的触摸不得进入输入，以及错误源合同拒绝加载。Python 全量分析测试 387 项通过；Android `aispect-core` Debug 与 Release JVM 测试各 80 项通过。
+- 当前报告 `gate-le2110-fpr-limit-sweep-20261024` 的目标误触率为 1% 时，最佳候选在设备留出折上的重触召回约 16.50%，最差姿势组约 9.33%，最差分组误接受率约 2.80%。这不能达到 90% 召回目标，也不能宣称生产误触率低于 1%。报告仍缺少交错正负样本、跨设备充分覆盖和三个独立种子的证明，模型只能保持研究候选。
+- 本轮提交建立可复现的 v5 源合同和端侧运行时校验，尚未用 v5 重建全部派生数据、重新训练跨设备模型或完成五设备三 seed 严格评估，因此不包含准确率提升声明。

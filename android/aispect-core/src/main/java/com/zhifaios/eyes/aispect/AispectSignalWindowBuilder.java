@@ -40,7 +40,7 @@ public final class AispectSignalWindowBuilder {
         public final double requiredPostLiftDurationSeconds;
         public final boolean windowComplete;
 
-        Window(
+        public Window(
                 AispectModels.ImpactFrame[] frames,
                 int firstFrameIndex,
                 double anchorTimestampSeconds,

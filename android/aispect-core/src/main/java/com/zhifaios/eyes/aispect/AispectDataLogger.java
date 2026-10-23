@@ -92,6 +92,8 @@ public final class AispectDataLogger {
         }
         record.put("collector", collectorIdentity.toJson());
         record.put("label", label.toJson());
+        record.put("collectionContext", label.collectionContext.toJson());
+        record.put("automaticContext", automaticContext(impactWindow, signalSnapshot, downEventElapsedRealtimeNanos));
         record.put("manualLabelSource", "user_selected");
         record.put("sourceTouchKind", sourceTouchKind);
         record.put("timeAlignment", timeAlignmentToJson(
@@ -146,6 +148,39 @@ public final class AispectDataLogger {
             output.write(record.toString(2).getBytes(StandardCharsets.UTF_8));
         }
         return new SavedRecord(destination, record);
+    }
+
+    /** 原始重力用于分组，不从它猜测身体姿势；显示信息注明实际观测阶段。 */
+    private JSONObject automaticContext(AispectSignalWindowBuilder.Window window,
+                                       AispectImpactSignalCollector.Snapshot signal,
+                                       long downNanos) throws JSONException {
+        JSONObject result = new JSONObject();
+        result.put("schemaVersion", 1);
+        result.put("captureSource", "native_view");
+        result.put("displayRotation", displayRotation());
+        result.put("displayObservationPhase", "record_write");
+        result.put("screenRole", "unknown");
+        result.put("foldState", "unknown");
+        result.put("gravityUnit", "m/s^2");
+        AispectModels.ImpactFrame before = null;
+        for (AispectModels.ImpactFrame frame : window.frames) {
+            if (frame.sensorTimestampElapsedRealtimeNanos > 0
+                    && frame.sensorTimestampElapsedRealtimeNanos <= downNanos
+                    && (before == null || frame.sensorTimestampElapsedRealtimeNanos
+                    > before.sensorTimestampElapsedRealtimeNanos)) before = frame;
+        }
+        boolean available = signal.hasGravity && before != null
+                && Double.isFinite(before.gravityX) && Double.isFinite(before.gravityY)
+                && Double.isFinite(before.gravityZ)
+                && Math.sqrt(before.gravityX * before.gravityX + before.gravityY * before.gravityY
+                + before.gravityZ * before.gravityZ) > 1e-6;
+        result.put("gravityAvailable", available);
+        result.put("gravityAtPreDown", available ? new JSONArray().put(before.gravityX)
+                .put(before.gravityY).put(before.gravityZ) : JSONObject.NULL);
+        result.put("gravityTimestampKnown", false);
+        result.put("imuCarrierTimestampNanos", before == null
+                ? JSONObject.NULL : before.sensorTimestampElapsedRealtimeNanos);
+        return result;
     }
 
     static JSONObject captureWindowToJson(AispectSignalWindowBuilder.Window window) throws JSONException {

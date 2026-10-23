@@ -10,6 +10,7 @@ import random
 from collections import Counter, defaultdict, deque
 from pathlib import Path
 from statistics import median
+from collection_annotations import is_raw_sample_path, require_trainable, read_annotation, exclusion_reason
 
 from causal_press_features import CAUSAL_FEATURE_PRESETS
 from causal_press_features import TIME_GRID_FEATURE_CONTRACTS
@@ -90,6 +91,7 @@ def main():
         args.anchor_mode,
         args.require_press_active,
         args.feature_preset,
+        Path(args.matrix_jsonl) if args.matrix_jsonl else None,
     )
     if len(samples) < len(CLASS_ORDER) * 2:
         raise RuntimeError("not_enough_samples")
@@ -117,7 +119,7 @@ def main():
     loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights_multi(y_train, len(CLASS_ORDER), torch).to(device), reduction="none")
 
     best_state = None
-    best_score = -1.0
+    best_score = (-1.0, -1.0, -1.0)
     best_epoch = 0
     history = []
     for epoch in range(1, args.epochs + 1):
@@ -142,7 +144,8 @@ def main():
             "validBalancedAccuracy": valid_metrics["balancedAccuracy"],
         }
         history.append(row)
-        score = valid_metrics["balancedAccuracy"]
+        # 中文注释：最差类召回单独决定部署价值，不能被多数类拉高的平衡准确率掩盖。
+        score = checkpoint_score(valid_metrics)
         if should_update_best_state(bool(valid_samples), score, best_score):
             best_score = score
             best_epoch = epoch
@@ -204,6 +207,11 @@ def parse_args(argv=None):
     parser.add_argument("--split-strategy", default="random", choices=("random", "temporal", "predefined", "all"))
     parser.add_argument("--temporal-validation-ratio", type=float, default=0.20)
     parser.add_argument("--sample-cache", default="")
+    parser.add_argument(
+        "--matrix-jsonl",
+        default="",
+        help="使用预生成矩阵 JSONL，必须与清单的 sourceSha256 和契约完全一致",
+    )
     parser.add_argument("--early-stopping-patience", type=int, default=0)
     parser.add_argument(
         "--matrix-transform",
@@ -245,7 +253,8 @@ def load_or_cache_samples(
         cache_path,
         anchor_mode="down",
         require_press_active=True,
-        feature_contract=""):
+        feature_contract="",
+        matrix_jsonl=None):
     if anchor_mode == "down" and not require_press_active:
         raise RuntimeError("press_active_filter_required")
     signature = sample_cache_signature(
@@ -256,24 +265,51 @@ def load_or_cache_samples(
         require_press_active,
         feature_contract,
     )
+    if matrix_jsonl is not None:
+        matrix_path = Path(matrix_jsonl)
+        if not matrix_path.is_file():
+            raise RuntimeError("matrix_jsonl_missing")
+        signature["matrixJsonl"] = str(matrix_path.resolve())
+        signature["matrixJsonlSha256"] = hashlib.sha256(matrix_path.read_bytes()).hexdigest()
+        signature["manifestSha256"] = hashlib.sha256(Path(manifest_path).read_bytes()).hexdigest()
+    else:
+        signature["collectionReviewDigest"] = manifest_review_digest(manifest_path)
     if cache_path is not None and cache_path.exists():
         with cache_path.open("rb") as file:
             payload = pickle.load(file)
         if payload.get("signature") != signature:
             raise RuntimeError("sample_cache_signature_mismatch")
         samples = payload.get("samples", [])
+        if matrix_jsonl is not None:
+            return samples
+        # 复核可在缓存生成后发生；已失效的缓存必须重建，不能悄悄训练旧标签。
+        for sample in samples:
+            source = Path(sample["path"])
+            data = json.loads(source.read_text(encoding="utf-8"))
+            annotation = require_trainable(source, data)
+            if sample.get("collectionAnnotation") != annotation:
+                raise RuntimeError("sample_cache_review_changed_rebuild_required")
         apply_manifest_splits(samples, manifest_path, allow_manifest_subset=anchor_mode == "down")
         return samples
 
-    samples = load_samples(
-        manifest_path,
-        feature_names,
-        frame_indices,
-        missing_frame_policy,
-        anchor_mode,
-        require_press_active,
-        feature_contract,
-    )
+    if matrix_jsonl is None:
+        samples = load_samples(
+            manifest_path,
+            feature_names,
+            frame_indices,
+            missing_frame_policy,
+            anchor_mode,
+            require_press_active,
+            feature_contract,
+        )
+    else:
+        samples = load_matrix_samples(
+            manifest_path,
+            matrix_jsonl,
+            feature_names,
+            frame_indices,
+            feature_contract,
+        )
     if cache_path is not None:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = cache_path.with_suffix(cache_path.suffix + ".tmp")
@@ -281,6 +317,22 @@ def load_or_cache_samples(
             pickle.dump({"signature": signature, "samples": samples}, file, protocol=pickle.HIGHEST_PROTOCOL)
         temporary.replace(cache_path)
     return samples
+
+
+def manifest_review_digest(manifest_path):
+    # 将被排除样本的复核也纳入缓存身份，恢复标签后必须重新构建，不能永久漏采。
+    entries = []
+    with manifest_path.open("r", encoding="utf-8", newline="") as file:
+        for row in csv.DictReader(file):
+            path = resolve_path(row, manifest_path)
+            if path is None:
+                entries.append((row.get("path", ""), "missing", ""))
+                continue
+            raw = path.read_bytes()
+            annotation = read_annotation(path, json.loads(raw))
+            entries.append((str(path.resolve()), hashlib.sha256(raw).hexdigest(),
+                            json.dumps(annotation, sort_keys=True)))
+    return hashlib.sha256(json.dumps(sorted(entries)).encode("utf-8")).hexdigest()
 
 
 def sample_cache_signature(
@@ -318,6 +370,15 @@ def sample_cache_signature(
             "maxGapRule": "max(2*5ms,4*median_dt)",
         })
     return signature
+
+
+def checkpoint_score(metrics):
+    """优先优化最差类召回，再以平衡准确率和准确率打破并列。"""
+    return (
+        float(metrics.get("minRecall", 0.0)),
+        float(metrics.get("balancedAccuracy", 0.0)),
+        float(metrics.get("accuracy", 0.0)),
+    )
 
 
 def apply_manifest_splits(samples, manifest_path, allow_manifest_subset=False):
@@ -515,7 +576,7 @@ def build_schema5_manifest_rows(dataset_dir, required_frame_indices):
     rows = []
     reasons = Counter()
     seen_ids = {}
-    paths = sorted(Path(dataset_dir).rglob("*.json"))
+    paths = sorted(path for path in Path(dataset_dir).rglob("*.json") if is_raw_sample_path(path))
     for path in paths:
         try:
             payload = path.read_bytes()
@@ -524,6 +585,11 @@ def build_schema5_manifest_rows(dataset_dir, required_frame_indices):
             reasons["json_load_failed"] += 1
             continue
         sha256 = hashlib.sha256(payload).hexdigest()
+        try:
+            require_trainable(path, data)
+        except RuntimeError as error:
+            reasons[str(error)] += 1
+            continue
         row, reason = schema5_manifest_row(path, data, required_frame_indices, sha256)
         if row is None:
             reasons[reason] += 1
@@ -919,6 +985,9 @@ def load_samples(
                 continue
             with path.open("r", encoding="utf-8") as data_file:
                 data = json.load(data_file)
+            annotation = read_annotation(path, data)
+            if exclusion_reason(annotation):
+                continue
             if anchor_mode == "down":
                 if feature_contract in TIME_GRID_FEATURE_CONTRACTS:
                     if not is_time_grid_press_active(data):
@@ -939,6 +1008,7 @@ def load_samples(
             grid_quality = matrix_payload.get("gridQuality") if isinstance(matrix_payload, dict) else None
             matrix = matrix_payload["matrix"] if isinstance(matrix_payload, dict) else matrix_payload
             samples.append({
+                "collectionAnnotation": annotation,
                 "id": row.get("id", ""),
                 "path": str(path),
                 "label": CLASS_ORDER.index(class_label),
@@ -958,6 +1028,152 @@ def load_samples(
                 "liftReferenceFrameIndex": int(data.get("liftReferenceFrameIndex", -1)),
                 "gridQuality": grid_quality,
             })
+    return samples
+
+
+def load_matrix_samples(
+        manifest_path,
+        matrix_jsonl,
+        feature_names,
+        frame_indices,
+        feature_contract):
+    """读取预生成矩阵，并逐项校验来源身份、标签、契约和权重。"""
+    expected_contract = feature_contract or feature_contract_for_names(feature_names)
+    if not expected_contract:
+        raise RuntimeError("matrix_feature_contract_required")
+    expected_shape = [len(frame_indices), len(feature_names)]
+    matrices = {}
+    with Path(matrix_jsonl).open("r", encoding="utf-8") as source:
+        for line_number, line in enumerate(source, 1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise RuntimeError(
+                    "invalid_matrix_jsonl:" + str(line_number)
+                ) from error
+            source_sha256 = str(row.get("sourceSha256") or "")
+            if not source_sha256:
+                raise RuntimeError("matrix_missing_source_sha256")
+            if source_sha256 in matrices:
+                raise RuntimeError("duplicate_matrix_source_sha256")
+            matrices[source_sha256] = row
+
+    samples = []
+    seen_manifest_sources = set()
+    with Path(manifest_path).open("r", encoding="utf-8", newline="") as source:
+        for manifest_row in csv.DictReader(source):
+            class_label = manifest_row.get("class_label", "")
+            if class_label not in CLASS_ORDER:
+                continue
+            source_sha256 = (
+                manifest_row.get("sourceSha256")
+                or manifest_row.get("source_sha256")
+                or ""
+            )
+            if not source_sha256:
+                raise RuntimeError("manifest_missing_source_sha256")
+            if source_sha256 in seen_manifest_sources:
+                raise RuntimeError("duplicate_manifest_source_sha256")
+            seen_manifest_sources.add(source_sha256)
+            row = matrices.get(source_sha256)
+            if row is None:
+                raise RuntimeError("matrix_source_missing")
+            source_path = resolve_path(manifest_row, manifest_path)
+            if source_path is None:
+                raise RuntimeError("matrix_source_file_missing")
+            source_raw = source_path.read_bytes()
+            if hashlib.sha256(source_raw).hexdigest() != source_sha256:
+                raise RuntimeError("matrix_source_sha256_mismatch")
+            annotation = read_annotation(source_path, json.loads(source_raw))
+            if exclusion_reason(annotation):
+                raise RuntimeError("matrix_reviewed_excluded")
+            sample_id = str(row.get("sampleId") or "")
+            manifest_sample_id = str(manifest_row.get("sampleId") or manifest_row.get("id") or "")
+            if not sample_id or (manifest_sample_id and sample_id != manifest_sample_id):
+                raise RuntimeError("matrix_sample_identity_mismatch")
+            if str(row.get("classLabel") or "") != class_label:
+                raise RuntimeError("matrix_class_label_mismatch")
+            if str(row.get("featureContract") or "") != expected_contract:
+                raise RuntimeError("matrix_feature_contract_mismatch")
+            if list(row.get("featureNames") or []) != list(feature_names):
+                raise RuntimeError("matrix_feature_names_mismatch")
+            matrix = row.get("matrix")
+            shape = row.get("matrixShape")
+            if shape != expected_shape:
+                raise RuntimeError(
+                    "matrix_shape_mismatch:expected="
+                    + str(expected_shape)
+                    + ",actual="
+                    + str(shape)
+                    + ",contract="
+                    + expected_contract
+                )
+            if not isinstance(matrix, list) or len(matrix) != expected_shape[0]:
+                raise RuntimeError("matrix_shape_mismatch")
+            for values in matrix:
+                if not isinstance(values, list) or len(values) != expected_shape[1]:
+                    raise RuntimeError("matrix_shape_mismatch")
+                if not all(finite_float(value, None) is not None for value in values):
+                    raise RuntimeError("matrix_non_finite_value")
+            manifest_weight = finite_float(manifest_row.get("trainingWeight"), 1.0)
+            matrix_weight = finite_float(row.get("trainingWeight"), manifest_weight)
+            if not math.isclose(manifest_weight, matrix_weight, rel_tol=0.0, abs_tol=1e-9):
+                raise RuntimeError("matrix_training_weight_mismatch")
+            label_status = str(row.get("labelStatus") or "")
+            if label_status in {"mistake", "uncertain"}:
+                raise RuntimeError("matrix_reviewed_excluded")
+            if label_status and label_status != annotation["labelStatus"]:
+                raise RuntimeError("matrix_label_status_mismatch")
+            review_sha256 = str(row.get("reviewSha256") or "")
+            if review_sha256 != annotation["reviewSha256"]:
+                raise RuntimeError("matrix_review_digest_mismatch")
+            samples.append({
+                "collectionAnnotation": {
+                    "labelStatus": annotation["labelStatus"],
+                    "reviewSha256": annotation["reviewSha256"],
+                },
+                "id": sample_id,
+                "path": "",
+                "label": CLASS_ORDER.index(class_label),
+                "classLabel": class_label,
+                "matrix": matrix,
+                "createdAt": finite_float(
+                    manifest_row.get("sourceTimestampMs")
+                    or manifest_row.get("created_at")
+                    or row.get("sourceTimestampMs"),
+                    0.0,
+                ),
+                "sampleWeight": manifest_weight,
+                "split": manifest_row.get("split", ""),
+                "collectionName": (
+                    manifest_row.get("collection_name")
+                    or row.get("collectorUserName")
+                    or "unknown"
+                ),
+                "baselineGroup": (
+                    manifest_row.get("groupId")
+                    or manifest_row.get("group_id")
+                    or row.get("groupId")
+                    or ""
+                ),
+                "motionState": (
+                    manifest_row.get("motion_state")
+                    or row.get("motionState")
+                    or "unknown"
+                ),
+                "durationBucket": manifest_row.get("duration_bucket", "unknown"),
+                "rawSessionId": (
+                    manifest_row.get("raw_session_id")
+                    or row.get("sessionId")
+                    or ""
+                ),
+                "sourceSha256": source_sha256,
+                "gridQuality": row.get("gridQuality"),
+            })
+    if not samples:
+        raise RuntimeError("empty_matrix_manifest")
     return samples
 
 

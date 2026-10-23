@@ -74,6 +74,16 @@ public final class AispectCausalPressFeatureBuilderTest {
         assertEquals(20, AispectCausalPressFeatureBuilder.featureNames("causal_time_grid_imu11_touch9_v2").length);
         assertTrue(AispectCausalPressFeatureBuilder.isTimeGridFeatureContract("causal_time_grid_imu11_v2"));
         assertTrue(AispectCausalPressFeatureBuilder.isCausalFeatureContract("causal_time_grid_imu11_touch9_v2"));
+        String[] v5Names = AispectCausalPressFeatureBuilder.featureNames(
+                "causal_time_grid_imu11_touch7_mask5_v5"
+        );
+        assertEquals(23, v5Names.length);
+        for (String name : v5Names) {
+            assertFalse(name.contains("orientation"));
+        }
+        assertEquals(10, AispectCausalPressFeatureBuilder.featureNames(
+                "causal_time_grid_imu11_touch7_mask5_stats_mlp_v3"
+        ).length);
     }
 
     @Test
@@ -125,7 +135,7 @@ public final class AispectCausalPressFeatureBuilderTest {
                 350L
         );
         List<AispectTouchFrame> touches = new ArrayList<>();
-        touches.add(AispectTouchFrame.forTesting(90L, 100L, 0.25f, 0.5f, 300, 400, 1f, 0.5f, 50f, 25f, 0f, 1, true));
+        touches.add(AispectTouchFrame.forTesting(140L, 150L, 0.25f, 0.5f, 300, 400, 1f, 0.5f, 50f, 25f, 0f, 1, true));
         touches.add(AispectTouchFrame.forTesting(290L, 300L, 0.8f, 0.1f, 300, 400, 1f, 0.5f, 50f, 25f, 0f, 1, true));
 
         double[][] actual = AispectCausalPressFeatureBuilder.build(
@@ -136,8 +146,8 @@ public final class AispectCausalPressFeatureBuilderTest {
                 "causal_imu12_v1"
         );
 
-        assertEquals(0.25, actual[0][0], 1e-6);
-        assertEquals(0.50, actual[0][1], 1e-6);
+        assertEquals(0.25 / 300.0, actual[0][0], 1e-6);
+        assertEquals(0.50 / 400.0, actual[0][1], 1e-6);
     }
 
     private static JSONObject fixture() throws Exception {

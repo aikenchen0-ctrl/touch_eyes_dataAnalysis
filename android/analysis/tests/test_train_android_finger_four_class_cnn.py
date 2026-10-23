@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import json
 import math
 import pickle
@@ -14,6 +15,20 @@ import train_android_finger_four_class_cnn as trainer
 
 
 class TrainingControlTests(unittest.TestCase):
+    def test_checkpoint_selection_prioritizes_worst_class_recall(self):
+        balanced = {
+            "accuracy": 0.80,
+            "balancedAccuracy": 0.80,
+            "minRecall": 0.20,
+        }
+        robust = {
+            "accuracy": 0.76,
+            "balancedAccuracy": 0.76,
+            "minRecall": 0.55,
+        }
+
+        self.assertGreater(trainer.checkpoint_score(robust), trainer.checkpoint_score(balanced))
+
     def schema5_record(
             self,
             sample_id="sample-a",
@@ -285,6 +300,27 @@ class TrainingControlTests(unittest.TestCase):
 
         self.assertEqual("causal_time_grid_imu11_touch9_v2", scaler["featureContract"])
 
+    def test_mask6_contract_matches_prebuilt_training_matrix(self):
+        args = trainer.parse_args([
+            "--manifest", "manifest.csv",
+            "--output-dir", "out",
+            "--feature-preset", "causal_time_grid_imu11_touch9_mask6_v3",
+            "--frame-indices=-3,-2,-1,0,1,2,3,4,5",
+        ])
+
+        trainer.validate_cli_args(args)
+        names = trainer.causal_feature_names(args.feature_preset)
+        scaler = trainer.scaler_metadata(
+            [0.0 for _ in names],
+            [1.0 for _ in names],
+            names,
+            [-3, -2, -1, 0, 1, 2, 3, 4, 5],
+            args.feature_preset,
+        )
+
+        self.assertEqual(26, len(names))
+        self.assertEqual("causal_time_grid_imu11_touch9_mask6_v3", scaler["featureContract"])
+
     def test_time_grid_press_active_filter_uses_physical_lift_timestamp(self):
         data = {
             "schemaVersion": 6,
@@ -487,6 +523,102 @@ class TrainingControlTests(unittest.TestCase):
         self.assertEqual("walking", samples[0]["motionState"])
         self.assertEqual("q1", samples[0]["durationBucket"])
         self.assertEqual("session-a", samples[0]["rawSessionId"])
+
+    def test_prebuilt_matrix_loader_joins_by_source_hash_and_contract(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_path = root / "sample.json"
+            source_path.write_text(
+                json.dumps(self.schema5_record(sample_id="sample-a")),
+                encoding="utf-8",
+            )
+            source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
+            manifest = root / "fold.csv"
+            with manifest.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=[
+                    "id",
+                    "path",
+                    "class_label",
+                    "source_sha256",
+                    "raw_session_id",
+                    "split",
+                ])
+                writer.writeheader()
+                writer.writerow({
+                    "id": "sample-a",
+                    "path": str(source_path),
+                    "class_label": "thumb_light",
+                    "source_sha256": source_sha256,
+                    "raw_session_id": "session-a",
+                    "split": "valid",
+                })
+            matrix_path = root / "matrix.jsonl"
+            matrix_path.write_text(json.dumps({
+                "sourceSha256": source_sha256,
+                "sampleId": "sample-a",
+                "classLabel": "thumb_light",
+                "featureContract": "causal_time_grid_imu11_v2",
+                "featureNames": trainer.causal_feature_names("causal_time_grid_imu11_v2"),
+                "matrixShape": [9, 11],
+                "matrix": [[float(index)] * 11 for index in range(9)],
+                "trainingWeight": 1.0,
+                "labelStatus": "legacy_unreviewed",
+                "reviewSha256": "",
+            }) + "\n", encoding="utf-8")
+
+            samples = trainer.load_matrix_samples(
+                manifest,
+                matrix_path,
+                trainer.causal_feature_names("causal_time_grid_imu11_v2"),
+                list(range(-3, 6)),
+                "causal_time_grid_imu11_v2",
+            )
+
+        self.assertEqual(["sample-a"], [sample["id"] for sample in samples])
+        self.assertEqual("valid", samples[0]["split"])
+        self.assertEqual("session-a", samples[0]["rawSessionId"])
+        self.assertEqual([9, 11], [len(samples[0]["matrix"]), len(samples[0]["matrix"][0])])
+
+    def test_prebuilt_matrix_loader_rejects_manifest_source_hash_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_path = root / "sample.json"
+            source_path.write_text(
+                json.dumps(self.schema5_record(sample_id="sample-a")),
+                encoding="utf-8",
+            )
+            manifest = root / "fold.csv"
+            with manifest.open("w", encoding="utf-8", newline="") as file:
+                writer = csv.DictWriter(file, fieldnames=[
+                    "id", "path", "class_label", "source_sha256", "split"
+                ])
+                writer.writeheader()
+                writer.writerow({
+                    "id": "sample-a",
+                    "path": str(source_path),
+                    "class_label": "thumb_light",
+                    "source_sha256": "0" * 64,
+                    "split": "train",
+                })
+            matrix_path = root / "matrix.jsonl"
+            matrix_path.write_text(json.dumps({
+                "sourceSha256": "0" * 64,
+                "sampleId": "sample-a",
+                "classLabel": "thumb_light",
+                "featureContract": "causal_time_grid_imu11_v2",
+                "featureNames": trainer.causal_feature_names("causal_time_grid_imu11_v2"),
+                "matrixShape": [9, 11],
+                "matrix": [[0.0] * 11 for _ in range(9)],
+            }) + "\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "matrix_source_sha256_mismatch"):
+                trainer.load_matrix_samples(
+                    manifest,
+                    matrix_path,
+                    trainer.causal_feature_names("causal_time_grid_imu11_v2"),
+                    list(range(-3, 6)),
+                    "causal_time_grid_imu11_v2",
+                )
 
     def test_prepare_cli_does_not_require_manifest(self):
         args = trainer.parse_args([

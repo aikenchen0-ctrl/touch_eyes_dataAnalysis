@@ -98,7 +98,7 @@ public final class AispectCrossDeviceTimeGridFeatureBuilderTest {
     }
 
     @Test
-    public void timeGridTouchContractHonorsMissingShapeAvailability() {
+    public void timeGridV4ContractUsesPositiveShapeWithoutDeclaredRange() {
         AispectModels.ImpactFrame[] frames = new AispectModels.ImpactFrame[]{
                 frame(980_000_000L, -2.0),
                 frame(990_000_000L, -1.0),
@@ -117,12 +117,47 @@ public final class AispectCrossDeviceTimeGridFeatureBuilderTest {
                 frames,
                 touches,
                 1_000_000_000L,
-                "causal_time_grid_imu11_touch9_v2"
+                "causal_time_grid_imu11_touch9_mask6_v4"
         );
 
         assertNotNull(matrix);
+        assertEquals(26, matrix[0].length);
+        assertTrue(matrix[1][13] > 0.0);
+        assertTrue(matrix[1][14] > 0.0);
+        assertTrue(matrix[1][15] > 0.0);
+    }
+
+    @Test
+    public void timeGridTouchContractTreatsNonPositiveOrNonFiniteShapeAsMissing() {
+        AispectModels.ImpactFrame[] frames = new AispectModels.ImpactFrame[]{
+                frame(980_000_000L, -2.0),
+                frame(990_000_000L, -1.0),
+                frame(1_000_000_000L, 0.0),
+                frame(1_010_000_000L, 1.0),
+                frame(1_020_000_000L, 2.0),
+                frame(1_030_000_000L, 3.0)
+        };
+        List<AispectTouchFrame> touches = new ArrayList<>();
+        touches.add(AispectTouchFrame.forTesting(
+                990_000_000L, 990_500_000L, 200f, 600f, 1000, 2000,
+                0.5f, 0.0f, -1f, Float.NaN, 0f, 1, false
+        ));
+
+        double[][] matrix = AispectCausalPressFeatureBuilder.buildTimeGrid(
+                frames,
+                touches,
+                1_000_000_000L,
+                "causal_time_grid_imu11_touch7_mask5_v3"
+        );
+
+        assertNotNull(matrix);
+        assertEquals(0.0, matrix[1][12], 1e-6);
         assertEquals(0.0, matrix[1][13], 1e-6);
         assertEquals(0.0, matrix[1][14], 1e-6);
+        assertEquals(0.0, matrix[1][15], 1e-6);
+        assertEquals(0.0, matrix[1][19], 1e-6);
+        assertEquals(0.0, matrix[1][20], 1e-6);
+        assertEquals(0.0, matrix[1][21], 1e-6);
     }
 
     @Test
@@ -157,6 +192,81 @@ public final class AispectCrossDeviceTimeGridFeatureBuilderTest {
         assertEquals(0.0, matrix[1][20], 1e-6);
         assertEquals(0.0, matrix[1][21], 1e-6);
         assertEquals(1.0, matrix[1][22], 1e-6);
+    }
+
+    @Test
+    public void timeGridV5UsesBatchReceiptAcrossAllSlots() {
+        AispectModels.ImpactFrame[] frames = new AispectModels.ImpactFrame[]{
+                frameWithReceipt(980_000_000L, 982_000_000L, -2.0),
+                frameWithReceipt(990_000_000L, 992_000_000L, -1.0),
+                frameWithReceipt(1_000_000_000L, 1_002_000_000L, 0.0),
+                frameWithReceipt(1_010_000_000L, 1_012_000_000L, 1.0),
+                frameWithReceipt(1_020_000_000L, 1_022_000_000L, 2.0),
+                frameWithReceipt(1_030_000_000L, 1_032_000_000L, 3.0)
+        };
+        List<AispectTouchFrame> touches = new ArrayList<>();
+        touches.add(AispectTouchFrame.forTesting(
+                985_000_000L, 995_000_000L, 200f, 600f, 1000, 2000,
+                0.5f, 0.2f, 20f, 10f, 0f, 1, false
+        ));
+
+        double[][] v4 = AispectCausalPressFeatureBuilder.buildTimeGrid(
+                frames,
+                touches,
+                1_000_000_000L,
+                "causal_time_grid_imu11_touch9_mask6_v4"
+        );
+        double[][] v5 = AispectCausalPressFeatureBuilder.buildTimeGrid(
+                frames,
+                touches,
+                1_000_000_000L,
+                "causal_time_grid_imu11_touch7_mask5_v5"
+        );
+
+        assertNotNull(v4);
+        assertNotNull(v5);
+        assertEquals(0.0, v4[0][0], 1e-6);
+        assertEquals(0.2, v5[0][0], 1e-6);
+    }
+
+    @Test
+    public void timeGridV5RejectsTouchWithLateReceiptOrFutureEvent() {
+        AispectModels.ImpactFrame[] frames = new AispectModels.ImpactFrame[]{
+                frameWithReceipt(980_000_000L, 982_000_000L, -2.0),
+                frameWithReceipt(990_000_000L, 992_000_000L, -1.0),
+                frameWithReceipt(1_000_000_000L, 1_002_000_000L, 0.0),
+                frameWithReceipt(1_010_000_000L, 1_012_000_000L, 1.0),
+                frameWithReceipt(1_020_000_000L, 1_022_000_000L, 2.0),
+                frameWithReceipt(1_030_000_000L, 1_032_000_000L, 3.0)
+        };
+        List<AispectTouchFrame> lateReceipt = new ArrayList<>();
+        lateReceipt.add(AispectTouchFrame.forTesting(
+                985_000_000L, 1_033_000_000L, 200f, 600f, 1000, 2000,
+                0.5f, 0.2f, 20f, 10f, 0f, 1, false
+        ));
+        List<AispectTouchFrame> futureEvent = new ArrayList<>();
+        futureEvent.add(AispectTouchFrame.forTesting(
+                986_000_000L, 1_000_000_000L, 200f, 600f, 1000, 2000,
+                0.5f, 0.2f, 20f, 10f, 0f, 1, false
+        ));
+
+        double[][] late = AispectCausalPressFeatureBuilder.buildTimeGrid(
+                frames,
+                lateReceipt,
+                1_000_000_000L,
+                "causal_time_grid_imu11_touch7_mask5_v5"
+        );
+        double[][] future = AispectCausalPressFeatureBuilder.buildTimeGrid(
+                frames,
+                futureEvent,
+                1_000_000_000L,
+                "causal_time_grid_imu11_touch7_mask5_v5"
+        );
+
+        assertNotNull(late);
+        assertNotNull(future);
+        assertEquals(0.0, late[0][0], 1e-6);
+        assertEquals(0.0, future[0][0], 1e-6);
     }
 
     @Test
@@ -206,6 +316,35 @@ public final class AispectCrossDeviceTimeGridFeatureBuilderTest {
         )[8]);
     }
 
+    @Test
+    public void statsMlpContractProjectsPositiveShapeWithoutDeclaredRange() {
+        AispectModels.ImpactFrame[] frames = poseFrames();
+        List<AispectTouchFrame> touches = new ArrayList<>();
+        touches.add(AispectTouchFrame.forTesting(
+                990_000_000L, 990_500_000L, 200f, 600f, 1000, 2000,
+                0.5f, 0.2f, 20f, 10f, 0f, 1, false
+        ));
+
+        double[][] matrix = AispectCausalPressFeatureBuilder.buildTimeGrid(
+                frames,
+                touches,
+                1_000_000_000L,
+                "causal_time_grid_imu11_touch7_mask5_stats_mlp_v2"
+        );
+
+        assertNotNull(matrix);
+        assertEquals(9, matrix.length);
+        assertEquals(10, matrix[0].length);
+        assertEquals("size", AispectCausalPressFeatureBuilder.featureNames(
+                "causal_time_grid_imu11_touch7_mask5_stats_mlp_v2"
+        )[8]);
+        assertEquals("log_axis_ratio", AispectCausalPressFeatureBuilder.featureNames(
+                "causal_time_grid_imu11_touch7_mask5_stats_mlp_v2"
+        )[9]);
+        assertEquals(0.2, matrix[1][8], 1e-6);
+        assertEquals(Math.log(2.0), matrix[1][9], 1e-6);
+    }
+
     private static AispectModels.ImpactFrame[] poseFrames() {
         return new AispectModels.ImpactFrame[]{
                 poseFrame(980_000_000L, -2.0),
@@ -249,6 +388,14 @@ public final class AispectCrossDeviceTimeGridFeatureBuilderTest {
     }
 
     private static AispectModels.ImpactFrame frame(long timestampNanos, double x) {
+        return frameWithReceipt(timestampNanos, timestampNanos + 2_000_000L, x);
+    }
+
+    private static AispectModels.ImpactFrame frameWithReceipt(
+            long timestampNanos,
+            long receiptNanos,
+            double x
+    ) {
         return new AispectModels.ImpactFrame(
                 0,
                 x,
@@ -266,7 +413,7 @@ public final class AispectCrossDeviceTimeGridFeatureBuilderTest {
                 0,
                 timestampNanos / 1_000_000_000.0,
                 timestampNanos,
-                timestampNanos + 2_000_000L
+                receiptNanos
         );
     }
 }

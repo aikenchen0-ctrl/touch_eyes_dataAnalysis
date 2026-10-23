@@ -4,6 +4,9 @@ import math
 TIME_GRID_OFFSETS_MS = (-15, -10, -5, 0, 5, 10, 15, 20, 25)
 CONTRACT_IMU11 = "causal_time_grid_imu11_v2"
 CONTRACT_IMU11_TOUCH9 = "causal_time_grid_imu11_touch9_v2"
+CONTRACT_IMU11_TOUCH9_MASK6 = "causal_time_grid_imu11_touch9_mask6_v3"
+CONTRACT_IMU11_TOUCH9_MASK6_V4 = "causal_time_grid_imu11_touch9_mask6_v4"
+CONTRACT_IMU11_TOUCH7_MASK5_V5 = "causal_time_grid_imu11_touch7_mask5_v5"
 IMU_FEATURE_NAMES = (
     "x_norm",
     "y_norm",
@@ -28,9 +31,33 @@ TOUCH_FEATURE_NAMES = (
     "pointer_count",
     "touch_valid",
 )
+TOUCH_MASK6_FEATURE_NAMES = (
+    "pressure_available",
+    "size_available",
+    "major_available",
+    "minor_available",
+    "orientation_available",
+    "pointer_count_available",
+)
+TOUCH_MASK5_FEATURE_NAMES = (
+    "pressure_available",
+    "size_available",
+    "major_available",
+    "minor_available",
+    "pointer_count_available",
+)
 FEATURE_PRESETS = {
     CONTRACT_IMU11: IMU_FEATURE_NAMES,
     CONTRACT_IMU11_TOUCH9: IMU_FEATURE_NAMES + TOUCH_FEATURE_NAMES,
+    CONTRACT_IMU11_TOUCH9_MASK6: IMU_FEATURE_NAMES + TOUCH_FEATURE_NAMES + TOUCH_MASK6_FEATURE_NAMES,
+    CONTRACT_IMU11_TOUCH9_MASK6_V4: IMU_FEATURE_NAMES + TOUCH_FEATURE_NAMES + TOUCH_MASK6_FEATURE_NAMES,
+    # 中文注释：v5 删除姿态角三个通道，避免模型把设备朝向当作力度捷径。
+    CONTRACT_IMU11_TOUCH7_MASK5_V5: (
+        IMU_FEATURE_NAMES
+        + TOUCH_FEATURE_NAMES[:5]
+        + TOUCH_FEATURE_NAMES[7:]
+        + TOUCH_MASK5_FEATURE_NAMES
+    ),
 }
 
 ACCELERATION_SCALES = {
@@ -96,21 +123,64 @@ def build_time_grid_matrix(data, record, contract):
         raise RuntimeError("non_monotonic_imu_sensor_timestamp")
     median_dt = upper_middle_median(gaps)
     max_gap = max(2 * 5_000_000, 4 * median_dt)
-    rows = []
-    missing_masks = []
+    brackets = []
     for offset_ms in TIME_GRID_OFFSETS_MS:
         target_ns = down_ns + offset_ms * 1_000_000
         left, right = bracket_frame(canonical_frames, target_ns)
         gap = right["sensorTimestampElapsedRealtimeNanos"] - left["sensorTimestampElapsedRealtimeNanos"]
         if left is not right and (gap <= 0 or gap > max_gap):
             raise RuntimeError("time_grid_gap_exceeds_threshold")
+        brackets.append((target_ns, left, right))
+    # 中文注释：v5 的批量推理必须等九个网格槽的全部 IMU 支撑到齐；
+    # 其他合同保留逐槽可用性，确保历史缓存可以复现。
+    batch_availability_ns = max(
+        max(left["receivedElapsedRealtimeNanos"], right["receivedElapsedRealtimeNanos"])
+        for _, left, right in brackets
+    )
+    rows = []
+    missing_masks = []
+    for target_ns, left, right in brackets:
         imu_values = interpolate_imu(left, right, target_ns)
-        availability_time = max(left["receivedElapsedRealtimeNanos"], right["receivedElapsedRealtimeNanos"])
+        availability_time = (
+            batch_availability_ns
+            if contract == CONTRACT_IMU11_TOUCH7_MASK5_V5
+            else max(left["receivedElapsedRealtimeNanos"], right["receivedElapsedRealtimeNanos"])
+        )
         touch = latest_received_touch_frame(touch_frames, availability_time, target_ns)
-        touch_values, mask = touch_feature_values(touch, touch_metadata)
+        touch_values, mask = touch_feature_values(
+            touch,
+            touch_metadata,
+            contract,
+        )
         values = [touch_values[0], touch_values[1]] + imu_values
-        if contract == CONTRACT_IMU11_TOUCH9:
+        if contract == CONTRACT_IMU11_TOUCH7_MASK5_V5:
+            values.extend(touch_values[2:7])
+            values.extend(touch_values[9:])
+            values.extend(mask[name] for name in (
+                "pressure",
+                "size",
+                "major",
+                "minor",
+                "pointerCount",
+            ))
+        elif contract in (
+            CONTRACT_IMU11_TOUCH9,
+            CONTRACT_IMU11_TOUCH9_MASK6,
+            CONTRACT_IMU11_TOUCH9_MASK6_V4,
+        ):
             values.extend(touch_values[2:])
+            if contract in (
+                CONTRACT_IMU11_TOUCH9_MASK6,
+                CONTRACT_IMU11_TOUCH9_MASK6_V4,
+            ):
+                values.extend(mask[name] for name in (
+                    "pressure",
+                    "size",
+                    "major",
+                    "minor",
+                    "orientation",
+                    "pointerCount",
+                ))
         rows.append(values)
         missing_masks.append(mask)
     return {
@@ -127,6 +197,7 @@ def build_time_grid_matrix(data, record, contract):
             "sourceSampleRateHz": 1_000_000_000.0 / median_dt,
         },
         "missingMasks": missing_masks,
+        "touchAxisRangeAudit": touch_axis_range_audit(touch_frames),
     }
 
 
@@ -308,7 +379,17 @@ def latest_received_touch_frame(frames, receipt_time, target_ns):
     return selected
 
 
-def touch_feature_values(frame, metadata):
+def positive_axis_value(frame, key):
+    """Return true when an axis contains an observed positive finite value."""
+    if key not in frame:
+        return False
+    # 中文注释：原始 JSON 的数值可能已经解析为浮点数，
+    # 因此不能复用只接受字符串的 positive_int。
+    value = finite(frame.get(key))
+    return math.isfinite(value) and value > 0.0
+
+
+def touch_feature_values(frame, metadata, contract=CONTRACT_IMU11_TOUCH9):
     if frame is None:
         return [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], {
             "touch": 0,
@@ -325,10 +406,38 @@ def touch_feature_values(frame, metadata):
     width, height = touch_dimensions(frame, unit)
     diagonal = math.hypot(width, height)
     availability = frame.get("axisAvailability") or {}
-    pressure_valid = bool(availability.get("hasPressureRange", True)) and "pressure" in frame
-    size_valid = bool(availability.get("hasSizeRange", True)) and "size" in frame
-    major_valid = bool(availability.get("hasTouchMajorRange", True)) and "touchMajor" in frame
-    minor_valid = bool(availability.get("hasTouchMinorRange", True)) and "touchMinor" in frame
+    # 中文注释：旧合同保留声明的量程门控，保证历史缓存可复现；
+    # v4 才允许使用未声明量程但确为正数的相对尺寸。
+    use_positive_shape_without_range = (
+        contract in (
+            CONTRACT_IMU11_TOUCH9_MASK6_V4,
+            CONTRACT_IMU11_TOUCH7_MASK5_V5,
+        )
+    )
+    # 中文注释：v4 只放宽尺寸轴的量程要求，压力仍须有声明量程。
+    # 部分驱动会在没有压力量程时返回常量占位值，直接采信会产生伪信号。
+    pressure_valid = (
+        bool(availability.get("hasPressureRange", True))
+        and "pressure" in frame
+    )
+    if use_positive_shape_without_range:
+        size_valid = positive_axis_value(frame, "size")
+        major_valid = positive_axis_value(frame, "touchMajor")
+        minor_valid = positive_axis_value(frame, "touchMinor")
+    else:
+        # 中文注释：旧合同保持历史量程门控，避免旧缓存语义被静默改变。
+        size_valid = (
+            bool(availability.get("hasSizeRange", True))
+            and "size" in frame
+        )
+        major_valid = (
+            bool(availability.get("hasTouchMajorRange", True))
+            and "touchMajor" in frame
+        )
+        minor_valid = (
+            bool(availability.get("hasTouchMinorRange", True))
+            and "touchMinor" in frame
+        )
     orientation_valid = bool(availability.get("hasOrientationRange", False)) and "orientation" in frame
     pointer_valid = "pointerCount" in frame and positive_int(frame.get("pointerCount")) > 0
     major = finite(frame.get("touchMajor")) if major_valid else 0.0
@@ -365,6 +474,76 @@ def touch_feature_values(frame, metadata):
         "pointerCount": int(pointer_valid),
     }
     return values, mask
+
+
+def touch_axis_range_audit(frames):
+    """Summarize declared touch-axis scales without changing model input."""
+    names = (
+        "touchMajor",
+        "touchMinor",
+        "toolMajor",
+        "toolMinor",
+        "pressure",
+        "size",
+        "orientation",
+    )
+    result = {
+        "frameCount": len(frames),
+        "framesWithMotionRanges": 0,
+        "ranges": {},
+    }
+    for name in names:
+        maxima = []
+        resolutions = []
+        ratios = []
+        diagonal_ratios = []
+        for frame in frames:
+            ranges = frame.get("axisMotionRanges")
+            if not isinstance(ranges, dict):
+                continue
+            axis_range = ranges.get(name)
+            if not isinstance(axis_range, dict):
+                continue
+            maximum = finite(axis_range.get("max"))
+            minimum = finite(axis_range.get("min"))
+            resolution = finite(axis_range.get("resolution"))
+            value = finite(frame.get(name))
+            if maximum > minimum:
+                maxima.append(maximum)
+                resolutions.append(max(0.0, resolution))
+                ratios.append(
+                    clamp(
+                        (value - minimum) / (maximum - minimum),
+                        0.0,
+                        1.0,
+                    )
+                )
+                width = finite(frame.get("viewWidthPx"))
+                height = finite(frame.get("viewHeightPx"))
+                diagonal = math.hypot(width, height)
+                if diagonal > 0.0:
+                    diagonal_ratios.append(maximum / diagonal)
+        result["ranges"][name] = {
+            "declaredMax": max(maxima) if maxima else None,
+            "declaredResolution": max(resolutions) if resolutions else None,
+            "declaredToViewDiagonalMedian": (
+                upper_middle_median(diagonal_ratios)
+                if diagonal_ratios
+                else None
+            ),
+            "valueFractionMedian": (
+                upper_middle_median(ratios)
+                if ratios
+                else None
+            ),
+            "auditedFrameCount": len(ratios),
+        }
+    result["framesWithMotionRanges"] = sum(
+        isinstance(frame.get("axisMotionRanges"), dict)
+        and bool(frame.get("axisMotionRanges"))
+        for frame in frames
+    )
+    return result
 
 
 def normalized_touch_coordinate(frame, normalized_name, raw_name, dimension):

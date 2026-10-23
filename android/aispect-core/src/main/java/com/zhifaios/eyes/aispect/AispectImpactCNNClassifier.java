@@ -42,6 +42,7 @@ public final class AispectImpactCNNClassifier {
         public final int classCount;
         public final String[] labelOrder;
         public final String featureContract;
+        public final String runtimeArchitecture;
 
         ModelInfo(
                 String id,
@@ -54,7 +55,8 @@ public final class AispectImpactCNNClassifier {
                 String[] featureNames,
                 int classCount,
                 String[] labelOrder,
-                String featureContract
+                String featureContract,
+                String runtimeArchitecture
         ) {
             this.id = id;
             this.displayName = displayName;
@@ -67,6 +69,7 @@ public final class AispectImpactCNNClassifier {
             this.classCount = classCount;
             this.labelOrder = labelOrder.clone();
             this.featureContract = featureContract == null ? "" : featureContract;
+            this.runtimeArchitecture = runtimeArchitecture == null ? "" : runtimeArchitecture;
         }
     }
 
@@ -75,6 +78,8 @@ public final class AispectImpactCNNClassifier {
     private final Map<String, Boolean> modelLoadAttempts = new HashMap<>();
     private final Map<String, AispectTimeGridGroupNormRuntime> timeGridRuntimeCache = new HashMap<>();
     private final Map<String, Boolean> timeGridRuntimeLoadAttempts = new HashMap<>();
+    private final Map<String, AispectStatsMlpRuntime> statsMlpRuntimeCache = new HashMap<>();
+    private final Map<String, Boolean> statsMlpRuntimeLoadAttempts = new HashMap<>();
     private List<ModelInfo> catalogModels;
 
     public AispectImpactCNNClassifier(Context context) {
@@ -207,6 +212,31 @@ public final class AispectImpactCNNClassifier {
             AispectContactEncodingProfile contactEncodingProfile,
             List<AispectTouchFrame> touchFrames
     ) {
+        ModelInfo requestedInfo = modelInfoForId(modelId);
+        AispectStatsMlpRuntime statsMlpRuntime =
+                requestedInfo != null
+                        && AispectStatsMlpRuntime.isSupportedArchitecture(requestedInfo.runtimeArchitecture)
+                        ? statsMlpRuntimeForId(modelId)
+                        : null;
+        if (statsMlpRuntime != null) {
+            if (window == null || !window.windowComplete || touchFrames == null) {
+                return null;
+            }
+            double[][] raw = AispectCausalPressFeatureBuilder.buildTimeGrid(
+                    window.frames,
+                    touchFrames,
+                    Math.round(window.downAnchorTimestampSeconds * 1_000_000_000.0),
+                    statsMlpRuntime.featureContract()
+            );
+            double[] probabilities = statsMlpRuntime.predict(raw);
+            return probabilities == null
+                    ? null
+                    : new AispectModels.ImpactPrediction(
+                            probabilities,
+                            statsMlpRuntime.labelOrder(),
+                            modelId
+                    );
+        }
         AispectTimeGridGroupNormRuntime timeGridRuntime = timeGridRuntimeForId(modelId);
         if (timeGridRuntime != null) {
             if (window == null || !window.windowComplete || touchFrames == null) {
@@ -256,7 +286,12 @@ public final class AispectImpactCNNClassifier {
 
     public boolean hasAnyModel() {
         for (ModelInfo info : loadCatalogModels()) {
-            if (timeGridRuntimeForId(info.id) != null || modelForId(info.id) != null) {
+            boolean loaded = AispectStatsMlpRuntime.isSupportedArchitecture(info.runtimeArchitecture)
+                    ? statsMlpRuntimeForId(info.id) != null
+                    : AispectTimeGridGroupNormRuntime.isSupportedArchitecture(info.runtimeArchitecture)
+                    ? timeGridRuntimeForId(info.id) != null
+                    : modelForId(info.id) != null;
+            if (loaded) {
                 return true;
             }
         }
@@ -374,6 +409,29 @@ public final class AispectImpactCNNClassifier {
         return timeGridRuntimeCache.get(modelId);
     }
 
+    private AispectStatsMlpRuntime statsMlpRuntimeForId(String modelId) {
+        if (modelId == null) {
+            return null;
+        }
+        if (!statsMlpRuntimeLoadAttempts.containsKey(modelId)) {
+            statsMlpRuntimeLoadAttempts.put(modelId, true);
+            ModelInfo info = modelInfoForId(modelId);
+            if (info != null) {
+                try {
+                    JSONObject weights = new JSONObject(readAsset(resourceAssetPath(info.weightsResourceName)));
+                    JSONObject scaler = new JSONObject(readAsset(resourceAssetPath(info.scalerResourceName)));
+                    AispectStatsMlpRuntime runtime = AispectStatsMlpRuntime.load(info.id, weights, scaler);
+                    if (runtime != null) {
+                        statsMlpRuntimeCache.put(modelId, runtime);
+                    }
+                } catch (IOException | JSONException | RuntimeException error) {
+                    return null;
+                }
+            }
+        }
+        return statsMlpRuntimeCache.get(modelId);
+    }
+
     private List<ModelInfo> loadCatalogModels() {
         if (catalogModels != null) {
             return catalogModels;
@@ -413,18 +471,40 @@ public final class AispectImpactCNNClassifier {
             boolean isTimeGridRuntime = AispectTimeGridGroupNormRuntime.isSupportedArchitecture(
                     scaler.optString("runtimeArchitecture", "")
             );
-            int inputChannels = isTimeGridRuntime
-                    ? scaler.getJSONArray("channels").length()
-                    : scaler.getJSONArray("center").length();
+            boolean isStatsMlpRuntime = AispectStatsMlpRuntime.isSupportedArchitecture(
+                    scaler.optString("runtimeArchitecture", "")
+            );
+            String runtimeArchitecture = scaler.optString("runtimeArchitecture", "");
+            int inputChannels;
+            if (isStatsMlpRuntime) {
+                inputChannels = scaler.getJSONArray("featureNames").length();
+            } else if (isTimeGridRuntime) {
+                inputChannels = scaler.getJSONArray("channels").length();
+            } else {
+                inputChannels = scaler.getJSONArray("center").length();
+            }
             String[] featureNames = featureNames(scaler, inputChannels);
-            int[] frameIndices = isTimeGridRuntime
+            int[] frameIndices = (isTimeGridRuntime || isStatsMlpRuntime)
                     ? sequentialFrameIndices(scaler.getInt("frameCount"))
                     : frameIndices(scaler, id);
             int frameCount = scaler.optInt("frameCount", frameIndices.length);
             int classCount = scaler.optInt("classCount", 2);
             String[] labelOrder = labelOrder(scaler, classCount);
             String featureContract = scaler.optString("featureContract", "");
-            return new ModelInfo(id, displayName, weightsResourceName, scalerResourceName, inputChannels, frameCount, frameIndices, featureNames, classCount, labelOrder, featureContract);
+            return new ModelInfo(
+                    id,
+                    displayName,
+                    weightsResourceName,
+                    scalerResourceName,
+                    inputChannels,
+                    frameCount,
+                    frameIndices,
+                    featureNames,
+                    classCount,
+                    labelOrder,
+                    featureContract,
+                    runtimeArchitecture
+            );
         } catch (IOException | JSONException | RuntimeException error) {
             return null;
         }
@@ -447,7 +527,20 @@ public final class AispectImpactCNNClassifier {
             channels = 4;
             frameCount = 21;
         }
-        return new ModelInfo(modelId, modelId, weights, scaler, channels, frameCount, indices, features, labelOrder.length, labelOrder, "");
+        return new ModelInfo(
+                modelId,
+                modelId,
+                weights,
+                scaler,
+                channels,
+                frameCount,
+                indices,
+                features,
+                labelOrder.length,
+                labelOrder,
+                "",
+                ""
+        );
     }
 
     private double[][] makeFeatures(

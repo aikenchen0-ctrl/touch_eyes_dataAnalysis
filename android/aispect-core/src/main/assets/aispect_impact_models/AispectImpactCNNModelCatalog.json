@@ -250,5 +250,11 @@
     "id": "g13_time_f13_pre3_post9",
     "scalerResourceName": "AispectImpactCNNScaler_g13_time_f13_pre3_post9",
     "weightsResourceName": "AispectImpactCNNWeights_g13_time_f13_pre3_post9"
+  },
+  {
+    "displayName": "Experimental touch26 Stats MLP24 multitask",
+    "id": "touch26_stats_mlp24_multitask_experimental",
+    "scalerResourceName": "AispectStatsMlpScaler_touch26_stats_mlp24_multitask_experimental",
+    "weightsResourceName": "AispectStatsMlpWeights_touch26_stats_mlp24_multitask_experimental"
   }
 ]

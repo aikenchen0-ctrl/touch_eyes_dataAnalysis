@@ -106,7 +106,8 @@ public final class AispectModels {
 
     public enum TouchStrength {
         LIGHT("light"),
-        HEAVY("heavy");
+        HEAVY("heavy"),
+        ORDINARY("ordinary");
 
         private final String key;
 
@@ -138,15 +139,23 @@ public final class AispectModels {
         public final MotionState motionState;
         public final TouchStrength touchStrength;
         public final FingerType fingerType;
+        public final AispectCollectionContext collectionContext;
 
         public DatasetLabel(MotionState motionState, TouchStrength touchStrength) {
             this(motionState, touchStrength, FingerType.THUMB);
         }
 
         public DatasetLabel(MotionState motionState, TouchStrength touchStrength, FingerType fingerType) {
+            this(motionState, touchStrength, fingerType, AispectCollectionContext.unspecified());
+        }
+
+        public DatasetLabel(MotionState motionState, TouchStrength touchStrength, FingerType fingerType,
+                            AispectCollectionContext collectionContext) {
             this.motionState = motionState;
             this.touchStrength = touchStrength;
             this.fingerType = fingerType == null ? FingerType.THUMB : fingerType;
+            this.collectionContext = collectionContext == null
+                    ? AispectCollectionContext.unspecified() : collectionContext;
         }
 
         public String datasetKey() {

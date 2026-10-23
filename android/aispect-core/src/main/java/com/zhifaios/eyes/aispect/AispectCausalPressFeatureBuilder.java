@@ -11,6 +11,11 @@ public final class AispectCausalPressFeatureBuilder {
     private static final String CONTRACT_TIME_GRID_IMU11 = "causal_time_grid_imu11_v2";
     private static final String CONTRACT_TIME_GRID_IMU11_TOUCH9 = "causal_time_grid_imu11_touch9_v2";
     private static final String CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5 = "causal_time_grid_imu11_touch7_mask5_v3";
+    private static final String CONTRACT_TIME_GRID_IMU11_TOUCH9_MASK6_V4 = "causal_time_grid_imu11_touch9_mask6_v4";
+    private static final String CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_V5 = "causal_time_grid_imu11_touch7_mask5_v5";
+    private static final String CONTRACT_TIME_GRID_STATS_MLP_V1 = "causal_time_grid_imu11_touch7_mask5_stats_mlp_v1";
+    private static final String CONTRACT_TIME_GRID_STATS_MLP = "causal_time_grid_imu11_touch7_mask5_stats_mlp_v2";
+    private static final String CONTRACT_TIME_GRID_STATS_MLP_V3 = "causal_time_grid_imu11_touch7_mask5_stats_mlp_v3";
     private static final String CONTRACT_TIME_GRID_TOUCH7_MASK5_NO_GRAVITY = "causal_time_grid_touch7_mask5_no_gravity_v1";
     private static final String CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_DELTA_GRAVITY = "causal_time_grid_imu11_touch7_mask5_delta_gravity_v1";
     private static final long[] TIME_GRID_OFFSETS_NANOS = new long[]{
@@ -85,6 +90,75 @@ public final class AispectCausalPressFeatureBuilder {
             "minor_available",
             "pointer_count_available"
     };
+    private static final String[] IMU11_TOUCH9_MASK6_V4_FEATURE_NAMES = new String[]{
+            "x_norm",
+            "y_norm",
+            "userAcceleration.x",
+            "userAcceleration.y",
+            "userAcceleration.z",
+            "rotationRate.x",
+            "rotationRate.y",
+            "rotationRate.z",
+            "gravity.x",
+            "gravity.y",
+            "gravity.z",
+            "pressure",
+            "size",
+            "major_norm",
+            "minor_norm",
+            "log_axis_ratio",
+            "orientation_sin",
+            "orientation_cos",
+            "pointer_count",
+            "touch_valid",
+            "pressure_available",
+            "size_available",
+            "major_available",
+            "minor_available",
+            "orientation_available",
+            "pointer_count_available"
+    };
+    private static final String[] IMU11_TOUCH7_MASK5_V5_FEATURE_NAMES = new String[]{
+            "x_norm",
+            "y_norm",
+            "userAcceleration.x",
+            "userAcceleration.y",
+            "userAcceleration.z",
+            "rotationRate.x",
+            "rotationRate.y",
+            "rotationRate.z",
+            "gravity.x",
+            "gravity.y",
+            "gravity.z",
+            "pressure",
+            "size",
+            "major_norm",
+            "minor_norm",
+            "log_axis_ratio",
+            "pointer_count",
+            "touch_valid",
+            "pressure_available",
+            "size_available",
+            "major_available",
+            "minor_available",
+            "pointer_count_available"
+    };
+    private static final String[] STATS_MLP_PHYSICAL_FEATURE_NAMES = new String[]{
+            "x_norm",
+            "y_norm",
+            "userAcceleration.x",
+            "userAcceleration.y",
+            "userAcceleration.z",
+            "rotationRate.x",
+            "rotationRate.y",
+            "rotationRate.z",
+            "size",
+            "log_axis_ratio"
+    };
+    private static final String[] LEGACY_STATS_MLP_SOURCE_FEATURE_NAMES = IMU11_TOUCH7_MASK5_FEATURE_NAMES;
+    private static final String[] V2_STATS_MLP_SOURCE_FEATURE_NAMES = IMU11_TOUCH9_MASK6_V4_FEATURE_NAMES;
+    private static final String[] STATS_MLP_SOURCE_FEATURE_NAMES = IMU11_TOUCH7_MASK5_V5_FEATURE_NAMES;
+    private static final int[] STATS_MLP_SOURCE_INDICES = new int[]{0, 1, 2, 3, 4, 5, 6, 7, 12, 15};
     private static final String[] TOUCH7_MASK5_NO_GRAVITY_FEATURE_NAMES = new String[]{
             "x_norm",
             "y_norm",
@@ -142,6 +216,11 @@ public final class AispectCausalPressFeatureBuilder {
                 || CONTRACT_TIME_GRID_IMU11.equals(featureContract)
                 || CONTRACT_TIME_GRID_IMU11_TOUCH9.equals(featureContract)
                 || CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5.equals(featureContract)
+                || CONTRACT_TIME_GRID_IMU11_TOUCH9_MASK6_V4.equals(featureContract)
+                || CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_V5.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP_V1.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP_V3.equals(featureContract)
                 || CONTRACT_TIME_GRID_TOUCH7_MASK5_NO_GRAVITY.equals(featureContract)
                 || CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_DELTA_GRAVITY.equals(featureContract);
     }
@@ -150,6 +229,11 @@ public final class AispectCausalPressFeatureBuilder {
         return CONTRACT_TIME_GRID_IMU11.equals(featureContract)
                 || CONTRACT_TIME_GRID_IMU11_TOUCH9.equals(featureContract)
                 || CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5.equals(featureContract)
+                || CONTRACT_TIME_GRID_IMU11_TOUCH9_MASK6_V4.equals(featureContract)
+                || CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_V5.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP_V1.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP_V3.equals(featureContract)
                 || CONTRACT_TIME_GRID_TOUCH7_MASK5_NO_GRAVITY.equals(featureContract)
                 || CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_DELTA_GRAVITY.equals(featureContract);
     }
@@ -215,6 +299,17 @@ public final class AispectCausalPressFeatureBuilder {
         if (CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5.equals(featureContract)) {
             return IMU11_TOUCH7_MASK5_FEATURE_NAMES.clone();
         }
+        if (CONTRACT_TIME_GRID_IMU11_TOUCH9_MASK6_V4.equals(featureContract)) {
+            return IMU11_TOUCH9_MASK6_V4_FEATURE_NAMES.clone();
+        }
+        if (CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_V5.equals(featureContract)) {
+            return IMU11_TOUCH7_MASK5_V5_FEATURE_NAMES.clone();
+        }
+        if (CONTRACT_TIME_GRID_STATS_MLP_V1.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP_V3.equals(featureContract)) {
+            return STATS_MLP_PHYSICAL_FEATURE_NAMES.clone();
+        }
         if (CONTRACT_TIME_GRID_TOUCH7_MASK5_NO_GRAVITY.equals(featureContract)) {
             return TOUCH7_MASK5_NO_GRAVITY_FEATURE_NAMES.clone();
         }
@@ -264,7 +359,17 @@ public final class AispectCausalPressFeatureBuilder {
             if (touchFrame != null && (touchFrame.width <= 0 || touchFrame.height <= 0)) {
                 return null;
             }
-            fillVector(output[index], imuFrame, touchFrame, includeTouchDetails, includeTouchValidity, false, false);
+            fillVector(
+                    output[index],
+                    imuFrame,
+                    touchFrame,
+                    includeTouchDetails,
+                    includeTouchValidity,
+                    false,
+                    false,
+                    false,
+                    false
+            );
         }
         return output;
     }
@@ -315,9 +420,36 @@ public final class AispectCausalPressFeatureBuilder {
             return null;
         }
         long maxGap = Math.max(10_000_000L, medianGap * 4L);
+        boolean useV4Source = CONTRACT_TIME_GRID_IMU11_TOUCH9_MASK6_V4.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP.equals(featureContract);
+        boolean useV5Source = CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_V5.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP_V3.equals(featureContract);
         boolean includeTouchDetails = CONTRACT_TIME_GRID_IMU11_TOUCH9.equals(featureContract);
         boolean includeTouchMasks = isTouchMaskTimeGridContract(featureContract);
-        double[][] output = new double[TIME_GRID_OFFSETS_NANOS.length][includeTouchMasks ? 23 : (includeTouchDetails ? 20 : 11)];
+        boolean includeTouch9Masks = useV4Source;
+        int featureCount = includeTouch9Masks
+                ? 26
+                : (includeTouchMasks ? 23 : (includeTouchDetails ? 20 : 11));
+        double[][] output = new double[TIME_GRID_OFFSETS_NANOS.length][featureCount];
+        long batchAvailabilityReceipt = 0L;
+        if (useV5Source) {
+            for (long offset : TIME_GRID_OFFSETS_NANOS) {
+                FrameBracket bracket = frameBracket(
+                        ordered,
+                        downEventElapsedRealtimeNanos + offset
+                );
+                if (bracket == null) {
+                    return null;
+                }
+                batchAvailabilityReceipt = Math.max(
+                        batchAvailabilityReceipt,
+                        Math.max(
+                                bracket.left.receivedElapsedRealtimeNanos,
+                                bracket.right.receivedElapsedRealtimeNanos
+                        )
+                );
+            }
+        }
         for (int index = 0; index < TIME_GRID_OFFSETS_NANOS.length; index++) {
             long targetNanos = downEventElapsedRealtimeNanos + TIME_GRID_OFFSETS_NANOS[index];
             FrameBracket bracket = frameBracket(ordered, targetNanos);
@@ -328,10 +460,12 @@ public final class AispectCausalPressFeatureBuilder {
             if (bracket.left != bracket.right && (gap <= 0L || gap > maxGap)) {
                 return null;
             }
-            long availabilityReceipt = Math.max(
-                    bracket.left.receivedElapsedRealtimeNanos,
-                    bracket.right.receivedElapsedRealtimeNanos
-            );
+            long availabilityReceipt = useV5Source
+                    ? batchAvailabilityReceipt
+                    : Math.max(
+                            bracket.left.receivedElapsedRealtimeNanos,
+                            bracket.right.receivedElapsedRealtimeNanos
+                    );
             AispectTouchFrame touchFrame = latestTimeGridTouchFrame(touchFrames, availabilityReceipt, targetNanos);
             if (touchFrame != null && (touchFrame.width <= 0 || touchFrame.height <= 0)) {
                 return null;
@@ -343,7 +477,9 @@ public final class AispectCausalPressFeatureBuilder {
                     includeTouchDetails,
                     false,
                     true,
-                    includeTouchMasks
+                    includeTouchMasks,
+                    includeTouch9Masks,
+                    useV4Source || useV5Source
             );
         }
         return transformPoseInvariantTimeGrid(output, featureContract);
@@ -351,11 +487,43 @@ public final class AispectCausalPressFeatureBuilder {
 
     private static boolean isTouchMaskTimeGridContract(String featureContract) {
         return CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5.equals(featureContract)
+                || CONTRACT_TIME_GRID_IMU11_TOUCH9_MASK6_V4.equals(featureContract)
+                || CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_V5.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP_V1.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP_V3.equals(featureContract)
                 || CONTRACT_TIME_GRID_TOUCH7_MASK5_NO_GRAVITY.equals(featureContract)
                 || CONTRACT_TIME_GRID_IMU11_TOUCH7_MASK5_DELTA_GRAVITY.equals(featureContract);
     }
 
     private static double[][] transformPoseInvariantTimeGrid(double[][] source, String featureContract) {
+        if (CONTRACT_TIME_GRID_STATS_MLP_V1.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP.equals(featureContract)
+                || CONTRACT_TIME_GRID_STATS_MLP_V3.equals(featureContract)) {
+            String[] sourceFeatureNames = CONTRACT_TIME_GRID_STATS_MLP_V3.equals(featureContract)
+                    ? STATS_MLP_SOURCE_FEATURE_NAMES
+                    : (CONTRACT_TIME_GRID_STATS_MLP.equals(featureContract)
+                    ? V2_STATS_MLP_SOURCE_FEATURE_NAMES
+                    : LEGACY_STATS_MLP_SOURCE_FEATURE_NAMES);
+            int sizeAvailableIndex = indexOf(sourceFeatureNames, "size_available");
+            int majorAvailableIndex = indexOf(sourceFeatureNames, "major_available");
+            int minorAvailableIndex = indexOf(sourceFeatureNames, "minor_available");
+            double[][] output = new double[source.length][STATS_MLP_SOURCE_INDICES.length];
+            for (int rowIndex = 0; rowIndex < source.length; rowIndex++) {
+                for (int index = 0; index < STATS_MLP_SOURCE_INDICES.length; index++) {
+                    output[rowIndex][index] = source[rowIndex][STATS_MLP_SOURCE_INDICES[index]];
+                }
+                // 中文注释：物理合同沿用离线训练语义，不可用触摸测量以零占位进入统计。
+                if (source[rowIndex][sizeAvailableIndex] < 0.5) {
+                    output[rowIndex][8] = 0.0;
+                }
+                if (source[rowIndex][majorAvailableIndex] < 0.5
+                        || source[rowIndex][minorAvailableIndex] < 0.5) {
+                    output[rowIndex][9] = 0.0;
+                }
+            }
+            return output;
+        }
         if (CONTRACT_TIME_GRID_TOUCH7_MASK5_NO_GRAVITY.equals(featureContract)) {
             double[][] output = new double[source.length][20];
             for (int rowIndex = 0; rowIndex < source.length; rowIndex++) {
@@ -541,7 +709,9 @@ public final class AispectCausalPressFeatureBuilder {
             boolean includeTouchDetails,
             boolean includeTouchValidity,
             boolean respectAvailability,
-            boolean includeTouchMasks
+            boolean includeTouchMasks,
+            boolean includeTouch9Masks,
+            boolean usePositiveShapeWithoutRange
     ) {
         if (touchFrame != null) {
             output[0] = clamp(touchFrame.xNorm, 0.0, 1.0);
@@ -563,21 +733,37 @@ public final class AispectCausalPressFeatureBuilder {
             return;
         }
         double diagonal = Math.hypot(touchFrame.width, touchFrame.height);
-        double major = clamp(touchFrame.touchMajor, 0.0, diagonal);
-        double minor = clamp(touchFrame.touchMinor, 0.0, diagonal);
+        // 中文注释：v4 才允许使用未声明量程的正尺寸；
+        // 旧合同继续遵守量程可用性，避免历史模型输入语义漂移。
+        boolean sizeAvailable = usePositiveShapeWithoutRange
+                ? isPositiveFinite(touchFrame.size)
+                : (!respectAvailability || touchFrame.hasSizeRange);
+        boolean majorAvailable = usePositiveShapeWithoutRange
+                ? isPositiveFinite(touchFrame.touchMajor)
+                : (!respectAvailability || touchFrame.hasTouchMajorRange);
+        boolean minorAvailable = usePositiveShapeWithoutRange
+                ? isPositiveFinite(touchFrame.touchMinor)
+                : (!respectAvailability || touchFrame.hasTouchMinorRange);
+        double major = majorAvailable
+                ? clamp(touchFrame.touchMajor, 0.0, diagonal)
+                : 0.0;
+        double minor = minorAvailable
+                ? clamp(touchFrame.touchMinor, 0.0, diagonal)
+                : 0.0;
         output[11] = !respectAvailability || touchFrame.hasPressureRange
                 ? clamp(touchFrame.pressure, 0.0, 1.0)
                 : 0.0;
-        output[12] = !respectAvailability || touchFrame.hasSizeRange
+        output[12] = sizeAvailable
                 ? clamp(touchFrame.size, 0.0, 1.0)
                 : 0.0;
-        output[13] = !respectAvailability || touchFrame.hasTouchMajorRange
+        output[13] = majorAvailable && diagonal > 0.0
                 ? major / diagonal
                 : 0.0;
-        output[14] = !respectAvailability || touchFrame.hasTouchMinorRange
+        output[14] = minorAvailable && diagonal > 0.0
                 ? minor / diagonal
                 : 0.0;
-        output[15] = (!respectAvailability || (touchFrame.hasTouchMajorRange && touchFrame.hasTouchMinorRange))
+        output[15] = majorAvailable
+                && minorAvailable
                 && major > 0.0
                 && minor > 0.0
                 ? clamp(Math.log(major / minor), -4.0, 4.0)
@@ -588,13 +774,21 @@ public final class AispectCausalPressFeatureBuilder {
         }
         output[18] = clamp(touchFrame.pointerCount, 0.0, 10.0);
         output[19] = 1.0;
-        if (includeTouchMasks) {
+        if (includeTouch9Masks) {
+            // 中文注释：v4 与离线 touch26 的列序完全一致。
+            output[20] = touchFrame.hasPressureRange ? 1.0 : 0.0;
+            output[21] = sizeAvailable ? 1.0 : 0.0;
+            output[22] = majorAvailable ? 1.0 : 0.0;
+            output[23] = minorAvailable ? 1.0 : 0.0;
+            output[24] = touchFrame.hasOrientationRange ? 1.0 : 0.0;
+            output[25] = 1.0;
+        } else if (includeTouchMasks) {
             output[16] = clamp(touchFrame.pointerCount, 0.0, 10.0);
             output[17] = 1.0;
             output[18] = touchFrame.hasPressureRange ? 1.0 : 0.0;
-            output[19] = touchFrame.hasSizeRange ? 1.0 : 0.0;
-            output[20] = touchFrame.hasTouchMajorRange ? 1.0 : 0.0;
-            output[21] = touchFrame.hasTouchMinorRange ? 1.0 : 0.0;
+            output[19] = sizeAvailable ? 1.0 : 0.0;
+            output[20] = majorAvailable ? 1.0 : 0.0;
+            output[21] = minorAvailable ? 1.0 : 0.0;
             output[22] = 1.0;
         }
     }
@@ -605,5 +799,18 @@ public final class AispectCausalPressFeatureBuilder {
 
     private static double finite(double value) {
         return Double.isFinite(value) ? value : 0.0;
+    }
+
+    private static boolean isPositiveFinite(float value) {
+        return Float.isFinite(value) && value > 0.0f;
+    }
+
+    private static int indexOf(String[] values, String target) {
+        for (int index = 0; index < values.length; index++) {
+            if (target.equals(values[index])) {
+                return index;
+            }
+        }
+        throw new IllegalArgumentException("missing_feature_name");
     }
 }

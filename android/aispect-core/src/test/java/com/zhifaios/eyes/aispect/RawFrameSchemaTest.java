@@ -1,6 +1,7 @@
 package com.zhifaios.eyes.aispect;
 
 import org.junit.Test;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 
@@ -64,6 +65,45 @@ public final class RawFrameSchemaTest {
         assertEquals("linear_acceleration", AispectDataLogger.sensorMetadataToJson(snapshot).getString("sensorSource"));
         assertEquals("m/s^2", AispectDataLogger.sensorMetadataToJson(snapshot).getString("accelerationUnit"));
         assertEquals("pixels", AispectDataLogger.touchMetadataToJson().getString("touchUnit"));
+    }
+
+    @Test
+    public void touchFrameAlwaysDeclaresAxisMotionRangeContainer() throws Exception {
+        AispectTouchFrame frame = AispectTouchFrame.forTesting(
+                1_000_000_000L,
+                1_000_100_000L,
+                100f,
+                200f,
+                1080,
+                2400,
+                0.5f,
+                0.2f,
+                8f,
+                6f,
+                0f,
+                1,
+                false
+        );
+
+        JSONObject ranges = frame.toJson(0).getJSONObject("axisMotionRanges");
+        assertEquals(0, ranges.length());
+    }
+
+    @Test
+    public void axisRangeSerializesDriverScaleMetadata() throws Exception {
+        AispectTouchAxisRange range = new AispectTouchAxisRange(
+                0x1002,
+                0f,
+                2.8f,
+                0.01f,
+                0.02f,
+                0.1f
+        );
+
+        JSONObject json = range.toJson();
+        assertEquals(0x1002, json.getInt("source"));
+        assertEquals(2.8f, (float) json.getDouble("max"), 1e-6f);
+        assertEquals(0.1f, (float) json.getDouble("resolution"), 1e-6f);
     }
 
     @Test
